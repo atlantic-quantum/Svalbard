@@ -1,0 +1,29 @@
+name: svalbard
+dependencies:
+  - python>=3.10,<3.12
+  - numpy
+  - pip
+  - pip:
+    - Flask-Testing
+    - build
+    - pytest
+    - pytest-cov
+    - pylint
+    - isort
+    - black
+    - flake8
+    - pytest-asyncio # for testing async modules
+    - pydantic==v1.10 # for creating datamodels
+    - pylint-pydantic # to make pylint behave with pydantic
+    - motor # for async mongoDB
+    - fsspec # for general filesystem like data backends
+    - gcsfs # for Google Cloud storage data backend
+    - zarr # for storing array data in the cloud
+    - fastapi # for creating an API for the data server
+    - uvicorn # for launching fastapi apps
+    - httpx # for async communication with fastapi apps 
+    - scipy
+    - asteval
+    - rustworkx
+    - colorama
+    - pandas

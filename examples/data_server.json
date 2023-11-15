@@ -1,0 +1,19 @@
+{
+    "data_backend": {
+        "cls": "gcsfs.core.GCSFileSystem",
+        "protocol": "gcs",
+        "args": [],
+        "path": "bucket_name",
+        "project": "your_project_name",
+        "access": "read_write",
+        "token": null,
+        "endpoint_url": null,
+        "timeout": 1.0
+    },
+    "metadata_backend": {
+        "url": "mongodb/path",
+        "database": "your_database_name",
+        "collection": "your_collection_name",
+        "certificate": "path/to/your/x509/certificate.pem"
+    }
+}

@@ -1,0 +1,18 @@
+{
+    "data_backend": {
+        "cls": "fsspec.implementations.memory.MemoryFileSystem",
+        "protocol": "memory",
+        "args": [],
+        "path": "memory:/tmp/test/fs_backend_config",
+        "project": "your_project_name",
+        "access": "read_write",
+        "token": null,
+        "endpoint_url": null,
+        "timeout": 1.0
+    },
+    "metadata_backend": {
+        "url": "mongodb://root:example@localhost:27017",
+        "database": "test_database",
+        "collection": "test_collection"
+    }
+}
