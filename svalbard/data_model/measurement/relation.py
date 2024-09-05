@@ -5,8 +5,9 @@ dependent on other channels.
 
 import asteval
 import numpy as np
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
+from .channel import Channel
 from .lookup import LookupTable
 from .step_config import StepConfig
 
@@ -36,10 +37,26 @@ class RelationParameters(BaseModel):
     use_lookup: bool = False
     lookup_table: LookupTable | None = None
 
-    @validator("variable")
+    @field_validator("variable")
+    @classmethod
+    def variable_name_may_not_be_result(cls, v: str):
+        """Validate that variable name is not 'result'"""
+        assert v != "result"
+        return v
+
+    @field_validator("variable")
+    @classmethod
     def variable_must_be_valid_symbol_name(cls, v: str):
         """Validate that variable is a valid asteval symbol name"""
         assert asteval.valid_symbol_name(v)
+        return v
+
+    @field_validator("source_name")
+    @classmethod
+    def source_name_must_be_valid_symbol_name(cls, v: str):
+        """Validate that source_name is a valid asteval symbol name"""
+        if not asteval.valid_symbol_name(v):
+            v = Channel.make_pythonic(v)
         return v
 
     def values(self, source_values: np.ndarray) -> np.ndarray:
@@ -103,9 +120,10 @@ class RelationSettings(BaseModel):
             )
             for parameter in self.parameters
         }
-        symbol_table = asteval.make_symbol_table(use_numpy=True, **parameter_values)
+        symbol_table = asteval.make_symbol_table(
+            use_numpy=True, **parameter_values  # type: ignore
+        )
         aeval = asteval.Interpreter(symtable=symbol_table)
-        # todo should we allow parameter named result?
         aeval(f"result = {self.equation}")
         result = aeval.symtable["result"]
         assert isinstance(result, np.ndarray)

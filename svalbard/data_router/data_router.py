@@ -1,6 +1,9 @@
 """Fast API Router for the Data Server"""
+
+import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from functools import partial, wraps
 from pathlib import Path
@@ -26,21 +29,26 @@ from ..data_server.errors import (
     StreamAlreadyPreparedError,
     StreamNotPreparedError,
 )
-from ..data_server.frontend.abstract_frontend import AbstractFrontend
-from ..data_server.frontend.frontend_v1 import FrontendV1Config
+from ..data_server.frontend.frontend_v1 import FrontendV1, FrontendV1Config
+from ..utility.constants import ASYNCIO_SLEEP, MONITOR_TIMOUT
 from ..utility.logger import logger
+from ..utility.shared_array import SharedCounter
 
 DATA_SERVER_CONFIG = "data_server.json"
 DATA_SERVER_TEST_CONFIG = "data_server_test.json"
+DATA_SERVER_LOCAL_CONFIG = "data_server_local.json"
+DATA_SERVER_FILE_CONFIG = "data_server_file.json"
 CONFIG_PATH = Path("~/.aq_config").expanduser()
 DATA_CONFIG_PATH = CONFIG_PATH / DATA_SERVER_CONFIG
 DATA_CONFIG_TEST_PATH = CONFIG_PATH / DATA_SERVER_TEST_CONFIG
+DATA_CONFIG_LOCAL_PATH = CONFIG_PATH / DATA_SERVER_LOCAL_CONFIG
+DATA_CONFIG_FILE_PATH = CONFIG_PATH / DATA_SERVER_FILE_CONFIG
 
 
 class DataServer:
     """Container class around the dataserver frontend"""
 
-    _FRONTEND: AbstractFrontend = None  # type: ignore
+    _FRONTEND: FrontendV1 = None  # type: ignore
     NOT_SET_UP: str = (
         "Service Unavailable: Data Server has not been set up,"
         + "call '/setup' with a frontend config model to setup"
@@ -49,10 +57,10 @@ class DataServer:
         "DataServer is already set up, use '/reset' to reset the data server"
         + " to an empty state then post a frontend config using '/setup'"
     )
+    _MEMORIES: dict[str, SharedMemoryOut] = {}
 
     @classmethod
-    @property
-    def frontend(cls) -> AbstractFrontend:
+    def get_frontend(cls) -> FrontendV1:
         """frontend of the data server
 
         Returns:
@@ -60,9 +68,8 @@ class DataServer:
         """
         return cls._FRONTEND
 
-    # @frontend.setter
     @classmethod
-    def set_frontend(cls, frontend: AbstractFrontend):
+    def set_frontend(cls, frontend: FrontendV1):
         """Sets the frontend of the data server
 
         Args:
@@ -70,10 +77,6 @@ class DataServer:
                 set the frontend of the data server to this frontend
         """
         cls._FRONTEND = frontend
-
-    # @frontend.deleter
-    # def del_data_server(cls):
-    #     del cls._FRONTEND
 
 
 TAGS = ["Data", "Data Server"]
@@ -97,14 +100,14 @@ PATHS = [
 
 
 @asynccontextmanager
-async def lifespan(
+async def lifespan(  # pylint: disable=unused-argument
     app: FastAPI, data_config_path: str | Path = DATA_CONFIG_PATH
 ):  # pragma: no cover
     """Event called when the data server is started"""
     logger.info("DataServer started")
     if os.path.exists(data_config_path):
         logger.info("Loading DataServer from config")
-        config_json = json.loads(Path(data_config_path).read_text())
+        config_json = json.loads(Path(data_config_path).read_text(encoding="utf-8"))
         config = FrontendV1Config(**config_json)
         DataServer.set_frontend(config.init())
     else:
@@ -125,7 +128,7 @@ async def setup_data_server(config: FrontendV1Config):
         HTTPException: 409 if a dataserver has already been set up
     """
     logger.debug("Setting up DataServer from config: %s", config)
-    if DataServer.frontend is not None:
+    if DataServer.get_frontend() is not None:
         logger.warning("DataServer frontend already set up")
         raise HTTPException(status.HTTP_409_CONFLICT, detail=DataServer.ALREADY_SET_UP)
     DataServer.set_frontend(config.init())
@@ -166,8 +169,8 @@ def ds_setup_wrapper(coroutine):
 
 
 def save_callback():
+    """Callback function for when a file has finished saving"""
     logger.debug("File has finished saving in data_router")
-    return
 
 
 @ds_router.post("/save", response_model=SavedPath, status_code=status.HTTP_201_CREATED)
@@ -186,7 +189,7 @@ async def save(file: DataFile) -> SavedPath:
     Returns:
         Path: the path to the saved metadata
     """
-    path, save_task = await DataServer.frontend.save(file)
+    path, save_task = await DataServer.get_frontend().save(file)
     save_task.add_done_callback(partial(lambda e: save_callback()))
     return SavedPath(path=path)
 
@@ -194,7 +197,10 @@ async def save(file: DataFile) -> SavedPath:
 @ds_router.get("/load/{file_path:path}", response_model=DataFile)
 @ds_setup_wrapper
 async def load(
-    file_path: str, load_data: bool = True, load_path: Path | None = None
+    file_path: str,
+    background_tasks: BackgroundTasks,
+    load_data: bool = True,
+    load_path: Path | None = None,
 ) -> DataFile:
     """Load a DataFile using the metadata path for the datafile
 
@@ -215,16 +221,22 @@ async def load(
         DataFile: datafile loaded from the metadata path
     """
     try:
-        return await DataServer.frontend.load(
+        datafile = await DataServer.get_frontend().load(
             Path(file_path), load_data=load_data, load_path=load_path
         )
+        if load_data and datafile.data is not None:
+            memories = [dataset.memory for dataset in datafile.data.datasets]
+            background_tasks.add_task(_monitor_counters, _increase_counters(memories))
+        return datafile
     except FileNotFoundError as ferr:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(ferr)) from ferr
 
 
 @ds_router.post("/load_partial/{file_path:path}", response_model=DataFile)
 @ds_setup_wrapper
-async def load_partial(file_path: str, slice_list: SliceListModel) -> DataFile:
+async def load_partial(
+    file_path: str, slice_list: SliceListModel, background_tasks: BackgroundTasks
+) -> DataFile:
     """Partially load a DataFile using the metadata path for the datafile and
     the slice_list for portions to load
 
@@ -243,7 +255,13 @@ async def load_partial(file_path: str, slice_list: SliceListModel) -> DataFile:
     """
     slice_lists = slice_list.to_slice_lists()
     try:
-        return await DataServer.frontend.load(Path(file_path), slice_lists=slice_lists)
+        datafile = await DataServer.get_frontend().load(
+            Path(file_path), slice_lists=slice_lists
+        )
+        if datafile.data is not None:
+            memories = [dataset.memory for dataset in datafile.data.datasets]
+            background_tasks.add_task(_monitor_counters, _increase_counters(memories))
+        return datafile
     except FileNotFoundError as ferr:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(ferr)) from ferr
 
@@ -263,7 +281,7 @@ async def init_data(file: DataFile) -> SavedPath:
     Returns:
         Path: the path to the initialized metadata store
     """
-    path = await DataServer.frontend.init_data(file)
+    path = await DataServer.get_frontend().init_data(file)
     return SavedPath(path=path)
 
 
@@ -279,7 +297,7 @@ async def update_metadata(file_path: str, file: DataFile):
     Raises:
         HTTPException: if the DataServer has not been setup
     """
-    await DataServer.frontend.update_metadata(Path(file_path), file)
+    await DataServer.get_frontend().update_metadata(Path(file_path), file)
 
 
 @ds_router.post("/update/data/", status_code=status.HTTP_202_ACCEPTED)
@@ -315,13 +333,14 @@ async def _update_data_task(
     slice_lists = (
         data_and_slices.slices.to_slice_lists() if data_and_slices.slices else None
     )
-    await DataServer.frontend.update_data(
+    await DataServer.get_frontend().update_data(
         data_and_slices.data_file, slice_lists=slice_lists
     )
     if callback_url:
-        async with httpx.AsyncClient(base_url=callback_url) as client:
+        async with httpx.AsyncClient(base_url=str(callback_url)) as client:
             await client.post(
-                "/data/updated", content=data_and_slices.data_file.data.handle.json()
+                "/data/updated",
+                content=data_and_slices.data_file.data.handle.model_dump_json(),
             )
 
 
@@ -360,13 +379,15 @@ async def update(file_path: str, data_and_slices: DataFileAndSliceModel):
     slice_lists = (
         data_and_slices.slices.to_slice_lists() if data_and_slices.slices else None
     )
-    await DataServer.frontend.update(
+    await DataServer.get_frontend().update(
         Path(file_path), data_and_slices.data_file, slice_lists=slice_lists
     )
 
 
 @ds_router.post("/memory", response_model=SharedMemoryOut)
-async def create_memory(memory_in: SharedMemoryIn) -> SharedMemoryOut:
+async def create_memory(
+    memory_in: SharedMemoryIn, background_tasks: BackgroundTasks
+) -> SharedMemoryOut:
     """Creates a SharedMemoryOut object from a SharedMemoryIn object
 
     Args:
@@ -377,7 +398,9 @@ async def create_memory(memory_in: SharedMemoryIn) -> SharedMemoryOut:
         SharedMemoryOut:
             a object describing the shape and datatype of an allocated array
     """
-    return SharedMemoryOut.from_memory_in(memory_in)
+    memory_out = SharedMemoryOut.from_memory_in(memory_in)
+    background_tasks.add_task(_monitor_counters, _increase_counters([memory_out]))
+    return memory_out
 
 
 @ds_router.delete("/memory/{name:path}")
@@ -402,7 +425,7 @@ async def close(file: DataFile):
     Raises:
         HTTPException: if the DataServer has not been setup
     """
-    await DataServer.frontend.close(file)
+    await DataServer.get_frontend().close(file)
 
 
 @ds_router.post(
@@ -434,7 +457,7 @@ async def prepare_stream(ssm: StartStreamModel) -> SavedPath:
             the Data is used to determine the expected buffer sizes
     """
     try:
-        path = await DataServer.frontend.prepare_stream(ssm.handle, ssm.file)
+        path = await DataServer.get_frontend().prepare_stream(ssm.handle, ssm.data_file)
         return SavedPath(path=path)
     except StreamAlreadyPreparedError as serr:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(serr)) from serr
@@ -502,7 +525,7 @@ async def save_buffer_task(
     """
     logger.debug("Saving buffer %s", SaveBufferModel)
     logger.debug("Saving buffer got callback url: %s", callback_url)
-    await DataServer.frontend.save_buffer(
+    await DataServer.get_frontend().save_buffer(
         sbm.handle,
         sbm.name,
         sbm.buffer,
@@ -510,8 +533,8 @@ async def save_buffer_task(
         validated=validated,
     )
     if callback_url:
-        async with httpx.AsyncClient(base_url=callback_url) as client:
-            await client.post("/buffer/saved", content=sbm.buffer.json())
+        async with httpx.AsyncClient(base_url=str(callback_url)) as client:
+            await client.post("/buffer/saved", content=sbm.buffer.model_dump_json())
 
 
 @ds_router.post(
@@ -568,7 +591,7 @@ async def save_buffer(
             final data array.
     """
     try:
-        DataServer.frontend.validate_save_buffer_call(
+        DataServer.get_frontend().validate_save_buffer_call(
             sbm.handle,
             sbm.name,
             sbm.buffer,
@@ -620,6 +643,59 @@ async def finalize_stream(esm: EndStreamModel):
             Defaults to None.
     """
     try:
-        await DataServer.frontend.finalize_stream(esm.handle, esm.file)
+        await DataServer.get_frontend().finalize_stream(esm.handle, esm.data_file)
     except StreamNotPreparedError as serr:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(serr)) from serr
+
+
+def _increase_counters(memories: list[SharedMemoryOut]) -> dict[str, int]:
+    """
+    Increment all the counters of the provided memories,
+
+    Called before returning the memories using the DataRouter to the user such that the
+    memories are not deallocated before the user has recieved them.
+
+    Args:
+        datafile (DataFile): the datafile to increment counters for
+
+    Returns:
+        dict[str, int]: a dictionary of the current counter values
+    """
+    current_counter_values = {}
+    for memory in memories:
+        memory_name = memory.name
+        counter = SharedCounter(name=memory_name)
+        counter.increase()
+        current_counter_values[memory_name] = counter.value
+    return current_counter_values
+
+
+async def _monitor_counters(current_counter_values: dict[str, int]):
+    """
+    Monitor counters. If the counters are changed then the counters are decreased,
+    allowing this process to no longer keep refencees to the memories and them to be
+    closed if all processes have finished with them.
+
+    If the counters are not changed within 10 seconds then the counters are decreased.
+
+    Args:
+        current_counter_values (dict[str, int]):
+            dictionary of the current counter values, the keys are the memory names
+    """
+
+    time_start = time.time()
+
+    while time.time() - time_start < MONITOR_TIMOUT:
+        if not current_counter_values:
+            return
+        await asyncio.sleep(ASYNCIO_SLEEP)
+        decreased_counters = []
+        for memory_name, value in current_counter_values.items():
+            counter = SharedCounter(name=memory_name)
+            if counter.value != value:
+                counter.decrease()
+                decreased_counters.append(memory_name)
+        for memory_name in decreased_counters:
+            current_counter_values.pop(memory_name)
+    for memory_name in current_counter_values:
+        SharedCounter(name=memory_name).decrease()

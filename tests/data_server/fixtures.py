@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,8 +9,7 @@ from fsspec.asyn import get_loop
 from fsspec.implementations.memory import MemoryFileSystem
 from gcsfs import GCSFileSystem
 from gcsfs.retry import HttpError
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ServerSelectionTimeoutError
+
 from svalbard.data_server.data_backend.fs_backend import FSBackend, FSBackendConfig
 from svalbard.data_server.data_backend.gcs_backend import (
     GCSBackend,
@@ -26,26 +27,26 @@ from svalbard.data_server.metadata_backend.mongodb_backend import (
 )
 
 
-@pytest.fixture(name="test_bucket")
+@pytest.fixture(scope="session")
+def event_loop():
+    loop = asyncio.get_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(name="test_bucket", scope="session")
 def fixture_test_bucket():
     yield "aq_test"
 
 
-@pytest_asyncio.fixture(name="server_address")
-async def fixture_server_address():
+@pytest.fixture(name="server_address", scope="session")
+def fixture_server_address():
     """fixture for correctly setting the server address
     such that both local and CI server tests can run"""
-    try:
-        client = AsyncIOMotorClient(
-            "mongodb://root:example@localhost:27017", serverSelectionTimeoutMS=100
-        )
-        await client.server_info()
-        yield "localhost"
-    except ServerSelectionTimeoutError:
-        yield "mongodb"
+    yield "mongodb" if sys.platform == "linux" else "localhost"
 
 
-@pytest.fixture(name="mdb_backend")
+@pytest.fixture(name="mdb_backend", scope="session")
 def fixture_mdb_backend(server_address):
     """Create a MongoDBBackend for testing purposes"""
     mdb_backend = MongoDBBackend(
@@ -54,11 +55,22 @@ def fixture_mdb_backend(server_address):
         "test",
     )
     yield mdb_backend
-    # mdb_backend.client.drop_database(mdb_backend.database.name)
     mdb_backend.client.close()
 
 
-@pytest.fixture(name="fs_backend")
+@pytest.fixture(name="mdb_backend_module", scope="module")
+def fixture_mdb_backend_module(server_address):
+    """Create a MongoDBBackend for testing purposes"""
+    mdb_backend = MongoDBBackend(
+        f"mongodb://root:example@{server_address}:27017",
+        "aq_test",
+        "test",
+    )
+    yield mdb_backend
+    mdb_backend.client.close()
+
+
+@pytest_asyncio.fixture(name="fs_backend", scope="session")
 def fixture_fs_backend(event_loop):
     """Fixture for creating fs backend for use in other tests"""
     mfs = MemoryFileSystem()
@@ -74,7 +86,7 @@ def fixture_fs_backend(event_loop):
         pass
 
 
-@pytest.fixture(name="sync_fs_backend")
+@pytest.fixture(name="sync_fs_backend", scope="session")
 def fixture_sync_fs_backend():
     """Fixture for creating fs backend for use in other tests"""
     mfs = MemoryFileSystem()
@@ -90,7 +102,7 @@ def fixture_sync_fs_backend():
         pass
 
 
-@pytest.fixture(name="server_address_gcs")
+@pytest.fixture(name="server_address_gcs", scope="session")
 def fixture_server_address_gcs():
     """fixture for correctly setting the server address
     such that both local and CI server tests can run"""
@@ -101,7 +113,7 @@ def fixture_server_address_gcs():
         yield "fake-gcs-server"
 
 
-@pytest.fixture(name="gcs_filesystem")
+@pytest.fixture(name="gcs_filesystem", scope="session")
 def fixture_gcsfs(server_address_gcs, test_bucket):
     """Fixture for creating a gcsfs with an initialised bucket"""
     gcsfs = GCSFileSystem(endpoint_url=f"http://{server_address_gcs}:4443", timeout=1)
@@ -112,7 +124,7 @@ def fixture_gcsfs(server_address_gcs, test_bucket):
     yield gcsfs
 
 
-@pytest.fixture(name="gcs_backend")
+@pytest_asyncio.fixture(name="gcs_backend", scope="session")
 def fixture_gcs_backend(event_loop, test_bucket, gcs_filesystem: GCSFileSystem):
     """Fixture for creating fs backend for use in other tests"""
     try:
@@ -139,7 +151,7 @@ def fixture_gcs_backend(event_loop, test_bucket, gcs_filesystem: GCSFileSystem):
             pass
 
 
-@pytest.fixture(name="sync_gcs_backend")
+@pytest_asyncio.fixture(name="sync_gcs_backend", scope="session")
 def fixture_sync_gcs_backend(test_bucket, gcs_filesystem: GCSFileSystem):
     """Fixture for creating fs backend for use in other tests"""
     try:
@@ -166,7 +178,7 @@ def fixture_sync_gcs_backend(test_bucket, gcs_filesystem: GCSFileSystem):
             pass
 
 
-@pytest.fixture(name="frontend_mdb_fs")
+@pytest_asyncio.fixture(name="frontend_mdb_fs", scope="session")
 def fixture_frontend_with_mongo_and_fs(
     mdb_backend: MongoDBBackend, fs_backend: FSBackend
 ):
@@ -175,7 +187,7 @@ def fixture_frontend_with_mongo_and_fs(
     yield FrontendV1(fs_backend, mdb_backend)
 
 
-@pytest.fixture(name="frontend_mdb_gcs")
+@pytest_asyncio.fixture(name="frontend_mdb_gcs", scope="session")
 def fixture_frontend_with_mongo_and_gcs(
     mdb_backend: MongoDBBackend, gcs_backend: GCSBackend
 ):
@@ -184,7 +196,7 @@ def fixture_frontend_with_mongo_and_gcs(
     yield FrontendV1(gcs_backend, mdb_backend)
 
 
-@pytest.fixture(name="mdb_config")
+@pytest.fixture(name="mdb_config", scope="session")
 def fixture_mdb_config(server_address):
     """Fixture for creating a valid mongo db config"""
     yield MongoDBConfig(
@@ -194,13 +206,13 @@ def fixture_mdb_config(server_address):
     )
 
 
-@pytest.fixture(name="fs_config")
+@pytest.fixture(name="fs_config", scope="session")
 def fixture_fs_config():
     """fixture for creating a fs backend config"""
     yield FSBackendConfig(path=Path("memory:/tmp/test/fs_backend_config"))
 
 
-@pytest.fixture(name="gcs_config")
+@pytest.fixture(name="gcs_config", scope="session")
 def fixture_gcs_config(server_address_gcs, test_bucket):
     """fixture for creating a fs backend config"""
     yield GCSBackendConfig(
@@ -211,28 +223,28 @@ def fixture_gcs_config(server_address_gcs, test_bucket):
     )
 
 
-@pytest.fixture(name="frontend_fs_config")
+@pytest.fixture(name="frontend_fs_config", scope="session")
 def fixture_frontend_fs(mdb_config: MongoDBConfig, fs_config: FSBackendConfig):
     """Fixutre for creating a frontend with mongo db metadata
     backend and fsspec filesytem based data backend"""
     yield FrontendV1Config(data_backend=fs_config, metadata_backend=mdb_config)
 
 
-@pytest.fixture(name="frontend_gcs_config")
+@pytest.fixture(name="frontend_gcs_config", scope="session")
 def fixture_frontend_fsgcs(mdb_config: MongoDBConfig, gcs_config: GCSBackendConfig):
     """Fixutre for creating a frontend with mongo db metadata
     backend and gcsfs filesytem based data backend"""
     yield FrontendV1Config(data_backend=gcs_config, metadata_backend=mdb_config)
 
 
-@pytest.fixture(name="sync_frontend_fs_config")
+@pytest.fixture(name="sync_frontend_fs_config", scope="session")
 def fixture_sync_frontend_fs(mdb_config: MongoDBConfig, fs_config: FSBackendConfig):
     """Fixutre for creating a frontend with mongo db metadata
     backend and fsspec filesytem based data backend"""
     yield SyncFrontendV1Config(data_backend=fs_config, metadata_backend=mdb_config)
 
 
-@pytest.fixture(name="sync_frontend_gcs_config")
+@pytest.fixture(name="sync_frontend_gcs_config", scope="session")
 def fixture_sync_frontend_fsgcs(
     mdb_config: MongoDBConfig, gcs_config: GCSBackendConfig
 ):
@@ -241,33 +253,33 @@ def fixture_sync_frontend_fsgcs(
     yield SyncFrontendV1Config(data_backend=gcs_config, metadata_backend=mdb_config)
 
 
-@pytest.fixture(name="sync_frontend_mdb_fs")
+@pytest.fixture(name="sync_frontend_mdb_fs", scope="module")
 def fixture_sync_frontend_with_mongo_and_fs(
-    mdb_backend: MongoDBBackend, sync_fs_backend: FSBackend
+    mdb_backend_module: MongoDBBackend, sync_fs_backend: FSBackend
 ):
     """Fixture that creates a frontend with
     Mongo DB metadata backend and FS data backend"""
-    yield SyncFrontendV1(sync_fs_backend, mdb_backend)
+    yield SyncFrontendV1(sync_fs_backend, mdb_backend_module)
 
 
-@pytest.fixture(name="sync_frontend_mdb_gcs")
+@pytest.fixture(name="sync_frontend_mdb_gcs", scope="module")
 def fixture_sync_frontend_with_mongo_and_gcs(
-    mdb_backend: MongoDBBackend, sync_gcs_backend: GCSBackend
+    mdb_backend_module: MongoDBBackend, sync_gcs_backend: GCSBackend
 ):
     """Fixture that creates a frontend with
     Mongo DB metadata backend and FS data backend"""
-    yield SyncFrontendV1(sync_gcs_backend, mdb_backend)
+    yield SyncFrontendV1(sync_gcs_backend, mdb_backend_module)
 
 
 @pytest.fixture(name="final_fixture", scope="session")
 async def fixture_final_fixture(mdb_backend: MongoDBBackend):
     """Fixture that is run once at the end of all tests"""
     yield
-    await mdb_backend.client.drop_database(mdb_backend.database.name())
+    await mdb_backend.client.drop_database(mdb_backend.database.name())  # type: ignore
     mdb_backend.client.close()
 
 
-@pytest.fixture(name="slice_lists")
+@pytest.fixture(name="slice_lists", scope="session")
 def fixture_slice_lists():
     """Fixture for creating slice lists"""
     yield [

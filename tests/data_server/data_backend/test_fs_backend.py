@@ -1,4 +1,5 @@
 """Test fsspec FileSystem based backend using a MemoryFileSystem"""
+
 import asyncio
 import filecmp
 from pathlib import Path
@@ -7,13 +8,10 @@ import numpy as np
 import pytest
 import pytest_asyncio
 from fsspec.implementations.memory import MemoryFileSystem
+
 from svalbard.data_model.data_file import Data, MeasurementHandle
 from svalbard.data_model.ipc import BufferReference
-from svalbard.data_model.memory_models import (
-    SharedMemoryIn,
-    SharedMemoryOut,
-    __memory_reference__,
-)
+from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
 from svalbard.data_server.data_backend.fs_backend import FSBackend, FSBackendConfig
 from svalbard.data_server.errors import (
     BufferShapeError,
@@ -32,7 +30,7 @@ async def test_init_backend_from_config(fs_config: FSBackendConfig):
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_save_load(event_loop):
+async def test_end_to_end_save_load():
     """End to end save/load tests
     that contains all the steps instead of using fixture"""
     # create data
@@ -46,7 +44,7 @@ async def test_end_to_end_save_load(event_loop):
     mfs = MemoryFileSystem()
     path_base = Path("memory:/tmp/test/fs_backend")
     # event loop is a asyncio loop createdd for tests marked asyncio
-    data_backend = FSBackend(mfs, loop=event_loop, path_base=path_base)
+    data_backend = FSBackend(mfs, loop=asyncio.get_running_loop(), path_base=path_base)
 
     # save data
     path = await data_backend.save(data)
@@ -66,12 +64,10 @@ async def test_end_to_end_save_load(event_loop):
         mfs.rm(str(path_base), recursive=True)
     except FileNotFoundError:
         pass
-    SharedMemoryOut.close(smo.name)
-    [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_streaming(event_loop):
+async def test_end_to_end_streaming():
     """End to end streaming test
     that contains all the steps instead of using fixture"""
     # create buffers
@@ -93,17 +89,14 @@ async def test_end_to_end_streaming(event_loop):
     data = Data(handle=MeasurementHandle.new(), datasets=datasets)
 
     # create array with data to stream from
-    data_sizes = [
-        (10, 10),
-        (10, 5, 2),
-    ]
+    data_sizes: list[tuple[int, ...]] = [(10, 10), (10, 5, 2)]
     streamed_data = [np.arange(np.prod(shape)).reshape(shape) for shape in data_sizes]
 
     # create the backend
     mfs = MemoryFileSystem()
     path_base = Path("memory:/tmp/test/fs_backend")
     # event loop is a asyncio loop createdd for tests marked asyncio
-    data_backend = FSBackend(mfs, loop=event_loop, path_base=path_base)
+    data_backend = FSBackend(mfs, loop=asyncio.get_running_loop(), path_base=path_base)
 
     # prepare for stream
     path = await data_backend.prepare_stream(data)
@@ -113,12 +106,13 @@ async def test_end_to_end_streaming(event_loop):
     for j, buffer in enumerate(buffer_references):
         for i in range(10):
             buffer.to_array()[:] = streamed_data[j][i]
-            await data_backend.save_buffer(
+            buffer_save = data_backend.save_buffer(
                 data.handle,
                 datasets[j].name,
                 buffer,
                 (i,) + tuple(0 for _ in buffer.shape[1:]),
             )
+            await buffer_save
 
     # finalize stream
     await data_backend.finalize_stream(data.handle)
@@ -140,15 +134,12 @@ async def test_end_to_end_streaming(event_loop):
     except FileNotFoundError:
         pass
 
-    [SharedMemoryOut.close(br.name) for br in buffer_references]
-    [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
-
 
 class FSBackendTests:
     """Class for performing tests on Filesystem Backends,
     subclasses of FSBackend should subclass this class for testing."""
 
-    @pytest.fixture(name="backend")
+    @pytest.fixture(name="backend", scope="class")
     def fixture_fs_backend(self, fs_backend):
         """Fixture for creating fs backend for use in other tests"""
         yield fs_backend
@@ -170,7 +161,6 @@ class FSBackendTests:
             assert dataset.memory.shape == l_dataset.memory.shape
             assert dataset.memory.dtype == l_dataset.memory.dtype
             assert np.all(dataset.memory.to_array() == l_dataset.memory.to_array())
-            SharedMemoryOut.close(l_dataset.memory.name)
 
     @pytest.mark.asyncio
     async def test_save_partial_load(self, backend: FSBackend, data: Data):
@@ -196,7 +186,6 @@ class FSBackendTests:
             assert dataset.memory.dtype == l_dataset.memory.dtype
             sliced_data = dataset.memory.to_array()[tuple(sliced)]
             assert np.all(sliced_data == l_dataset.memory.to_array())
-            SharedMemoryOut.close(l_dataset.memory.name)
 
     @pytest.mark.asyncio
     async def test_loading_a_non_existent_file(self, backend: FSBackend, data: Data):
@@ -282,16 +271,16 @@ class FSBackendTests:
         l_data = await backend.load(path)
         assert len(data.datasets) != 0
         assert len(l_data.datasets) == 4
-        await backend.close(data)
 
     @pytest.mark.asyncio
     async def test_close_data(self, backend: FSBackend, data: Data):
         """Test closing data"""
         for dataset in data.datasets:
-            assert dataset.memory.name in __memory_reference__
+            dataset.memory.to_array()
         await backend.close(data)
         for dataset in data.datasets:
-            assert dataset.memory.name not in __memory_reference__
+            with pytest.raises(FileNotFoundError):
+                dataset.memory.to_array()
 
     @pytest.mark.asyncio
     async def test_update_data(self, backend: FSBackend, data: Data):
@@ -307,9 +296,6 @@ class FSBackendTests:
             assert dataset.memory.shape == l_dataset.memory.shape
             assert dataset.memory.dtype == l_dataset.memory.dtype
             assert np.all(dataset.memory.to_array() == l_dataset.memory.to_array())
-
-        await backend.close(data)
-        await backend.close(l_data)
 
     @pytest.mark.asyncio
     async def test_update_data_not_init_error(self, backend: FSBackend, data: Data):
@@ -353,9 +339,6 @@ class FSBackendTests:
             assert dataset.memory.dtype == l_dataset.memory.dtype
             assert np.all(dataset.memory.to_array() == l_dataset.memory.to_array())
 
-        await backend.close(data)
-        await backend.close(l_data)
-
     @pytest.mark.asyncio
     async def test_update_data_resize(
         self, backend: FSBackend, data: Data, slice_lists: list[list[slice]]
@@ -392,8 +375,6 @@ class FSBackendTests:
                 == l_dataset.memory.to_array()[tuple(slice_list)]
             )
 
-        await backend.close(data)
-
 
 class TestFSBackendWithStreaming(FSBackendTests):
     """Streaming tests for data backend"""
@@ -408,38 +389,6 @@ class TestFSBackendWithStreaming(FSBackendTests):
         assert streamed_data.handle.handle in backend.handles
         await backend.finalize_stream(streamed_data.handle)
         assert streamed_data.handle.handle not in backend.handles
-
-    @pytest.mark.asyncio
-    async def test_stream_data_1d(
-        self,
-        backend: FSBackend,
-        streamed_data: Data,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preparing a stream, streaming data to the
-        backend and finalizing the stream"""
-        async_lock = asyncio.Lock()
-        async for save_buffer in self.streaming_test_generator(
-            backend, streamed_data, buffer_references, (10,)
-        ):
-            async with async_lock:
-                await save_buffer
-
-    @pytest.mark.asyncio
-    async def test_stream_data_1d_random(
-        self,
-        backend: FSBackend,
-        streamed_data: Data,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preparing a stream, streaming data to the
-        backend, in a random order, and finalizing the stream"""
-        async_lock = asyncio.Lock()
-        async for save_buffer in self.streaming_test_generator(
-            backend, streamed_data, buffer_references, (10,), random=True
-        ):
-            async with async_lock:
-                await save_buffer
 
     @pytest.mark.asyncio
     async def test_stream_data_1d_gather(
@@ -522,7 +471,7 @@ class TestFSBackendWithStreaming(FSBackendTests):
         await backend.prepare_stream(streamed_data)
         with pytest.raises(StreamNotPreparedError):
             await backend.save_buffer(
-                MeasurementHandle.new(), "dummy_name", buffer_references[0], (0,)
+                MeasurementHandle.new(), "psm_dummy", buffer_references[0], (0,)
             )
 
     @pytest.mark.asyncio
@@ -548,12 +497,12 @@ class TestFSBackendWithStreaming(FSBackendTests):
         (used as chunk size) raises a BufferShapeError"""
         await backend.prepare_stream(streamed_data)
         valid_name = streamed_data.datasets[0].name
-        invalid_buffer = BufferReference(dtype="float", shape=(999,), name="dummy_name")
+        smi = SharedMemoryIn(dtype="float", shape=(999,))
+        invalid_buffer = BufferReference.from_memory_in(smi)
         with pytest.raises(BufferShapeError):
             await backend.save_buffer(
                 streamed_data.handle, valid_name, invalid_buffer, (0,)
             )
-        SharedMemoryOut.close(invalid_buffer.name)
 
     @pytest.mark.asyncio
     async def test_saving_buffer_require_prepared_datatype(
@@ -563,16 +512,14 @@ class TestFSBackendWithStreaming(FSBackendTests):
         data type raises a type error"""
         await backend.prepare_stream(streamed_data)
         valid_name = streamed_data.datasets[0].name
-        invalid_buffer = BufferReference(
-            dtype="uint",
-            shape=streamed_data.datasets[0].memory.shape,
-            name="dummy_name",
+        smi = SharedMemoryIn(
+            dtype="complex", shape=streamed_data.datasets[0].memory.shape
         )
+        invalid_buffer = BufferReference.from_memory_in(smi)
         with pytest.raises(TypeError):
             await backend.save_buffer(
                 streamed_data.handle, valid_name, invalid_buffer, (0,)
             )
-        SharedMemoryOut.close(invalid_buffer.name)
 
     @pytest.mark.asyncio
     async def test_saving_buffer_require_matching_index_shape(
@@ -582,11 +529,10 @@ class TestFSBackendWithStreaming(FSBackendTests):
         than the prepared dataset raises a value error"""
         await backend.prepare_stream(streamed_data)
         valid_name = streamed_data.datasets[0].name
-        valid_buffer = BufferReference(
-            dtype="float",
-            shape=streamed_data.datasets[0].memory.shape,
-            name="dummy_name",
+        smi = SharedMemoryIn(
+            dtype="float", shape=streamed_data.datasets[0].memory.shape
         )
+        valid_buffer = BufferReference.from_memory_in(smi)
         with pytest.raises(ValueError):
             await backend.save_buffer(
                 streamed_data.handle,
@@ -594,7 +540,6 @@ class TestFSBackendWithStreaming(FSBackendTests):
                 valid_buffer,
                 (0, 0, 0),
             )
-        SharedMemoryOut.close(valid_buffer.name)
 
     async def streaming_test_generator(
         self,
@@ -624,7 +569,6 @@ class TestFSBackendWithStreaming(FSBackendTests):
         assert_datasets_match(streamed_data.datasets, l_data.datasets)
 
         assert len(l_data.datasets) == len(buffer_references)
-        [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
         buffer_data = buffer_upload_data(buffer_references, size)
         arr = np.arange(np.prod(size)).reshape(size)
         if random:
@@ -650,13 +594,12 @@ class TestFSBackendWithStreaming(FSBackendTests):
         assert_datasets_match(streamed_data.datasets, l_data.datasets, buffer_data)
 
         await backend.finalize_stream(streamed_data.handle)
-        [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
 
 
 class TestFSBackendFromConfig(FSBackendTests):
     """Test FSBackend created from config"""
 
-    @pytest_asyncio.fixture(name="backend")
+    @pytest_asyncio.fixture(name="backend", scope="class")
     async def fixture_fs_backend_config(self, fs_config: FSBackendConfig):
         """Fixture for creating fs backend for use in other tests"""
         fsb = fs_config.init()

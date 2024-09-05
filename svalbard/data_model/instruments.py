@@ -1,43 +1,40 @@
 """
 Data models for instruments, including settings, connections, and hardware
 """
+
 from abc import abstractmethod
 from enum import Enum
 from typing import Protocol
 
-from pydantic import (
-    BaseModel,
-    StrictBool,
-    StrictFloat,
-    StrictInt,
-    root_validator,
-    validator,
-)
+import numpy as np
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+from ..typing import TSettingValue
+from ._setting_types import LIST_SETTING_TYPES, SettingType
 
 
-class SettingType(Enum):
-    """Enumeration for instrument setting types"""
+class SweepCapability(Enum):
+    """Enumeration of different sweep capabilities for instrument settings"""
 
-    FLOAT = "float"
-    INT = "int"
-    BOOL = "bool"
-    ENUM = "enum"
-    STR = "str"
     NONE = "none"
-    COMPLEX = "complex"
+    SW_GENERATED_SW_SET = "sw_generated_sw_set"
+    SW_GENERATED_HW_SET = "sw_generated_hw_set"
+    HW_GENERATED_HW_SET = "hw_generated_hw_set"
 
 
-_setting_type_map = {
-    SettingType.FLOAT: float,
-    "float": float,
-    SettingType.INT: int,
-    "int": int,
-    SettingType.BOOL: bool,
-    "bool": bool,
-    SettingType.STR: str,
-    "str": str,
-    SettingType.COMPLEX: complex,
-}
+class Drain(BaseModel):
+    """
+    Drain data model, used to specify which instrument setting is used as a drain.
+    i.e. settings of other instruments that should be set to the value of this setting
+
+    Args:
+        identity (str): instrument identity of the setting
+        setting (str): name of instrument setting used as drain
+    """
+
+    model_config = ConfigDict(frozen=True)
+    identity: str
+    setting: str
 
 
 class InstrumentSetting(BaseModel):
@@ -47,21 +44,42 @@ class InstrumentSetting(BaseModel):
     Args:
         name (str):
             name of the setting
-        value (float | int | bool):
-            value of the setting
-        type (str):
-            type of the setting, defaults to "float"
+        value (TSettingValue | None):
+            value of the setting, can be a single value or a list of values.
+            A single value can be a float, int, bool, Enum, or str.
+            A list of values can be a list of floats, ints, bools, Enums, or strs.
+            Complex values are stored as strings, e.g. "1.0+2.0j"
+        dtype (SettingType):
+            type of the setting, defaults to "SettingType.None"
         unit (str):
             unit of the setting, defaults to ""
+        sweep_capability (SweepCapability):
+            sweep capability of the setting, defaults to "sw_generated_sw_set"
+        drains (list[Drain]):
+            list of drains, i.e. settings of other instruments that should be set to the
+            value of this setting, when this setting is changed, defaults to []
     """
 
     name: str
-    value: StrictBool | StrictInt | StrictFloat | Enum | str
+    value: TSettingValue | None
     dtype: SettingType = SettingType.NONE
     unit: str = ""
+    sweep_capability: SweepCapability = SweepCapability.SW_GENERATED_SW_SET
+    drains: list[Drain] = []
     # todo should this have shape e.g. for settings that are waveforms or traces?
 
-    @root_validator(pre=True)
+    def get_value_string(self) -> str:
+        """Get value as string for the instrument setting, for use in UI
+
+        Returns:
+            str: String describing value of instrument setting
+        """
+        return SettingType.get_setting_type_class(self.dtype).get_value_string(
+            self.value, self.unit
+        )
+
+    @model_validator(mode="before")  # type: ignore
+    @classmethod
     def validate_value_and_type(cls, values: dict):
         """
         if type is given, cast value to that type
@@ -74,50 +92,43 @@ class InstrumentSetting(BaseModel):
         Returns:
             dict: parsed values
         """
-        values["dtype"] = values.get("dtype", SettingType.NONE)
+        if isinstance(values["value"], np.generic):
+            values["value"] = values["value"].item()
+        if isinstance(values["value"], np.ndarray):
+            values["value"] = values["value"].tolist()
 
-        if values["dtype"] == SettingType.ENUM or values["dtype"] == "enum":
-            values["dtype"] = SettingType.ENUM
-            if isinstance(values["value"], Enum):
-                values["value"] = values["value"].value
-            return values
-
-        if values["dtype"] == SettingType.COMPLEX or values["dtype"] == "complex":
-            values["dtype"] = SettingType.COMPLEX
-            if isinstance(values["value"], complex):
-                values["value"] = f"{values['value'].real}+{values['value'].imag}j"
-            return values
-
-        if values["dtype"] != SettingType.NONE:
-            try:
-                values["value"] = _setting_type_map[values["dtype"]](values["value"])
-            except (ValueError, TypeError) as err:
-                raise ValueError(
-                    f"Value {values['value']} could not be cast to {values['dtype']}"
-                ) from err
-            return values
-
-        if isinstance(values["value"], complex):
-            values["dtype"] = SettingType.COMPLEX
-            values["value"] = f"{values['value'].real}+{values['value'].imag}j"
-        elif isinstance(values["value"], float):
-            values["dtype"] = SettingType.FLOAT
-        elif isinstance(values["value"], bool):
-            # bool is a subclass of int, so this must be checked first
-            values["dtype"] = SettingType.BOOL
-        elif isinstance(values["value"], int):
-            values["dtype"] = SettingType.INT
-        elif isinstance(values["value"], Enum):
-            values["dtype"] = SettingType.ENUM
-            values["value"] = values["value"].value
-        elif isinstance(values["value"], str):
-            values["dtype"] = SettingType.STR
-        else:
-            raise ValueError(
-                f"Could not infer type from value {values['value']}, "
-                f"please specify type explicitly"
+        values["dtype"] = SettingType.determine_setting_type(
+            values["value"], values.get("dtype", None)
+        )
+        setting_type = values["dtype"]
+        if values.get("value", None) is not None:
+            _check_value_correct_type(setting_type, values["value"], values["name"])
+            values["value"] = SettingType.get_setting_type_class(setting_type).to_value(
+                values["value"]
             )
         return values
+
+    def add_drain(self, target_instrument: str, target_setting: str) -> None:
+        """Add a drain to the instrument setting
+
+        Args:
+            target_instrument (str): identity of the target instrument
+            target_setting (str): name of the target setting on the target instrument
+        """
+        drain = Drain(identity=target_instrument, setting=target_setting)
+        if drain not in self.drains:
+            self.drains.append(drain)
+
+    def remove_drain(self, target_instrument: str, target_setting: str) -> None:
+        """Remove a drain from the instrument setting
+
+        Args:
+            target_instrument (str): identity of the target instrument
+            target_setting (str): name of the target setting on the target instrument
+        """
+        drain = Drain(identity=target_instrument, setting=target_setting)
+        if drain in self.drains:
+            self.drains.remove(drain)
 
 
 class StartupBehaviour(Enum):
@@ -242,6 +253,9 @@ class InstrumentModel(BaseModel):
             dictionary of instrument settings, keyed by setting name.
             defaults to {}
             See InstrumentSetting documentation for details.
+        allow_new_settings (bool):
+            allow new settings to be added to the settings dictionary.
+            defaults to False
 
     """
 
@@ -252,13 +266,105 @@ class InstrumentModel(BaseModel):
     identity: str = "unknown"
     connection: InstrumentConnection = InstrumentConnection()
     settings: dict[str, InstrumentSetting] = {}
+    allow_new_settings: bool = False
 
-    @validator("settings")
+    @field_validator("settings")
+    @classmethod
     def validate_settings(cls, settings: dict[str, InstrumentSetting]):
         """Validate that the keys of settings are the same as their names"""
         for key, setting in settings.items():
             assert key == setting.name
         return settings
+
+    def get_id_string(self) -> str:
+        """Get a string that uniquely identifies the instrument"""
+        return f"{self.hardware} - {self.identity} - {self.serial}"
+
+    def has_setting(self, setting_name: str) -> bool:
+        """
+        Returns:
+            True: If the InstrumentModel has an InstrumentSetting name 'setting_name'
+            False: Otherwise
+        """
+        return setting_name in self.settings
+
+    def update_setting(
+        self, setting: str, value: TSettingValue, unit: str | None = None
+    ):
+        """Update the settings of the instrument with new settings
+
+        Args:
+            setting (str):
+                name of the setting to update
+            value (str):
+                new value for the setting
+            unit (str, optional):
+                new unit for the setting. Default: None -> unit is unchanged
+        """
+        if value is None:
+            raise ValueError("Value of InstrumentSetting may not be set to None")
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if isinstance(value, np.generic):
+            value = value.item()
+        isetting = self.get_setting(setting)
+        _check_value_correct_type(isetting.dtype, value, setting, self.identity)
+        isetting.value = value
+        if unit is not None:
+            isetting.unit = unit
+
+    def add_setting(self, setting: InstrumentSetting):
+        """Add a new setting to the instrument
+
+        Args:
+            setting (InstrumentSetting):
+                new setting to add to the instrument
+
+        Raises:
+            ValueError: if setting already exists or new settings are not allowed
+        """
+        if not self.allow_new_settings:
+            raise ValueError(
+                f"New settings are not allowed for this model {self.identity}"
+            )
+        if self.has_setting(setting.name):
+            raise ValueError(f"Setting {setting.name} already exists")
+        self.settings[setting.name] = setting
+
+    def get_setting(self, setting: str) -> InstrumentSetting:
+        """Get a setting from the instrument
+
+        Args:
+            setting (str):
+                name of the setting to get
+
+        Returns:
+            InstrumentSetting:
+                setting from the instrument
+
+        Raises:
+            ValueError: if the setting does not exist.
+        """
+        if not self.has_setting(setting):
+            raise ValueError(
+                f"Instrument model: '{self.identity}' doesn't have setting: '{setting}'"
+            )
+        return self.settings[setting]
+
+    def needs_drainage(self, setting: str) -> bool:
+        """
+        Args:
+            setting (str): name of the setting to check
+
+        Returns:
+            bool:
+                True if the setting needs to be drained to from other instruments.
+                False otherwise.
+        """
+        instrument_setting = self.get_setting(setting)
+        if instrument_setting.dtype in [SettingType.MODEL, SettingType.LIST_MODEL]:
+            return True
+        return False
 
 
 class SupportsInstrumentModel(Protocol):
@@ -270,7 +376,7 @@ class SupportsInstrumentModel(Protocol):
     """
 
     @abstractmethod
-    def to_insturment_settings(self) -> list[InstrumentSetting]:
+    def to_instrument_settings(self) -> list[InstrumentSetting]:
         """
         Convert the object to a list of InstrumentSetting objects
 
@@ -302,3 +408,36 @@ class SupportsInstrumentModel(Protocol):
                 InstrumentModel object to convert
         """
         raise NotImplementedError
+
+
+def _check_value_correct_type(
+    setting_type: SettingType,
+    value: TSettingValue,
+    setting_name: str,
+    instrument_name: str = "",
+):
+    """Minimal type checking for setting values
+
+    Args:
+        setting_type (SettingType):
+            type of the settings value
+        value (TSettingValue):
+            value of the setting
+        setting_name (str):
+            name of the setting, used for error messages
+        instrument_name (str, optional):
+            name of instrument the setting belongs to. Defaults to "",
+            used for error messages.
+
+    Raises:
+        ValueError: If the setting type is a list and the value is not a list
+        ValueError: If the setting type is not a list and the value is a list
+    """
+    istr = f"for instrument '{instrument_name}'" if instrument_name else ""
+    sstr = f"Value of setting '{setting_name}' "
+    if setting_type in LIST_SETTING_TYPES:
+        if not isinstance(value, list):
+            raise ValueError(f"{sstr}{istr} must be a list, got '{value}'")
+    else:
+        if isinstance(value, list):
+            raise ValueError(f"{sstr}{istr} must be a single value, got '{value}'")

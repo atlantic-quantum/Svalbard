@@ -3,6 +3,7 @@ import json
 import bson
 import pytest
 from pydantic import ValidationError
+
 from svalbard.data_model.instruments import (
     InstrumentModel,
     InstrumentSetting,
@@ -13,7 +14,7 @@ from svalbard.data_model.measurement.channel import Channel
 
 def test_channel_bson(channel: Channel):
     """Test that DataFile can be converted to bson"""
-    bson_encoded = bson.BSON.encode(json.loads(channel.json()))
+    bson_encoded = bson.BSON.encode(json.loads(channel.model_dump_json()))
     assert bson_encoded is not None
     bson_decoded = bson.BSON(bson_encoded).decode()
     new_channel = Channel(**bson_decoded)
@@ -38,13 +39,15 @@ def test_channel_error():
             unit_physical="test",
         )
 
-    with pytest.raises(ValidationError):
-        Channel(
-            name="s p a c e s",
-            instrument_identity="test",
-            instrument_setting_name="test",
-            unit_physical="test",
-        )
+
+def test_channel_name_modification():
+    ch = Channel(
+        name="s p a c e s",
+        instrument_identity="test",
+        instrument_setting_name="test",
+        unit_physical="test",
+    )
+    assert ch.name == "s_p_a_c_e_s"
 
 
 def test_from_instrument_model_setting():
@@ -124,3 +127,30 @@ def test_get_instrument_setting_error():
 
     with pytest.raises(ValueError):
         channel.get_instrument_setting({instr_model2.identity: instr_model2})
+
+
+def test_json_serial_deserialization(channel: Channel):
+    new_channel = Channel.model_validate_json(channel.model_dump_json())
+    assert new_channel == channel
+
+
+def test_json_serial_deserialization_no_limit(channel_no_limit: Channel):
+    new_channel = Channel.model_validate_json(channel_no_limit.model_dump_json())
+    assert new_channel == channel_no_limit
+
+
+def test_json_serial_deserialization_none_limit(channel_none_limit: Channel):
+    new_channel = Channel.model_validate_json(channel_none_limit.model_dump_json())
+    assert new_channel == channel_none_limit
+
+
+@pytest.mark.parametrize("setting", ["setting", "setting___extra"])
+def test_default_channel_name(setting: str):
+    instrument = "instrument"
+    assert Channel.default_name(instrument, setting) == f"{instrument}___{setting}"
+    assert Channel.get_instrument_and_setting(
+        Channel.default_name(instrument, setting)
+    ) == (instrument, setting)
+
+    with pytest.raises(ValueError):
+        Channel.get_instrument_and_setting("not_valid")

@@ -1,4 +1,5 @@
 """Data Model Fixtures"""
+
 from pathlib import Path
 
 import numpy as np
@@ -86,7 +87,6 @@ def fixture_shared_memories(shapes_and_dtypes):
         )
 
     yield mems_out
-    [SharedMemoryOut.close(mem_out.name) for mem_out in mems_out]
 
 
 @pytest.fixture(name="datasets")
@@ -96,7 +96,6 @@ def fixture_datasets(shared_memories: list[SharedMemoryOut]):
         Data.DataSet(name=f"test_name_{i}", memory=memory)
         for i, memory in enumerate(shared_memories)
     ]
-    [SharedMemoryOut.close(memory.name) for memory in shared_memories]
 
 
 @pytest.fixture(name="data")
@@ -118,7 +117,6 @@ def fixture_buffer_references():
     ]
     buffer_references = [BufferReference.from_memory_in(smi) for smi in smis]
     yield buffer_references
-    [SharedMemoryOut.close(br.name) for br in buffer_references]
 
 
 @pytest.fixture(name="buffer_references_2d")
@@ -134,7 +132,6 @@ def fixture_buffer_references_2d():
     ]
     buffer_references = [BufferReference.from_memory_in(smi) for smi in smis]
     yield buffer_references
-    [SharedMemoryOut.close(br.name) for br in buffer_references]
 
 
 @pytest.fixture(name="streamed_datasets")
@@ -185,7 +182,7 @@ def fixture_start_stream(streamed_data_file: DataFile):
     handle = MeasurementHandle.new()
     assert streamed_data_file.data is not None
     streamed_data_file.data.handle = handle
-    yield StartStreamModel(handle=handle, file=streamed_data_file)
+    yield StartStreamModel(handle=handle, data_file=streamed_data_file)
 
 
 @pytest.fixture(name="end_stream_model")

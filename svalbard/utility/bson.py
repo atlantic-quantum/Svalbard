@@ -4,15 +4,11 @@ Custom codecs for Mongo DB BSON encoding
 
 import os
 import pathlib
-from typing import Any, Mapping, MutableMapping, TypeVar, Union
+from typing import Any, Mapping
 
 from bson import BSON
 from bson.binary import USER_DEFINED_SUBTYPE, Binary
 from bson.codec_options import CodecOptions, TypeCodec, TypeRegistry
-from bson.raw_bson import RawBSONDocument
-
-_DocumentIn = Union[MutableMapping[str, Any], "RawBSONDocument"]
-_DocumentType = TypeVar("_DocumentType", bound=Mapping[str, Any])
 
 
 class PosixPathCodec(TypeCodec):
@@ -43,11 +39,11 @@ def get_codec_options() -> CodecOptions:
     return CodecOptions(type_registry=type_registry)
 
 
-def encode(doc: _DocumentIn) -> BSON:
+def encode(doc: Mapping[str, Any]) -> BSON:
     """wrap BSON.encode with our custom encoding"""
     return BSON.encode(doc, codec_options=get_codec_options())
 
 
-def decode(bson: BSON) -> _DocumentType:
+def decode(bson: BSON) -> dict[str, Any]:
     """wrap BSON.decode with our custom encoding"""
     return BSON.decode(bson, codec_options=get_codec_options())

@@ -1,15 +1,16 @@
 """function for launching a fastapi app and
 removing shared memory from resource_tracker is needed"""
+
 import os
 from multiprocessing import resource_tracker
 
 import colorama
 
 colorama.init()
-import uvicorn  # noqa: E402
-from fastapi import FastAPI  # noqa: E402
+import uvicorn  # noqa: E402 # pylint: disable=wrong-import-position
+from fastapi import FastAPI  # noqa: E402 # pylint: disable=wrong-import-position
 
-_USE_POSIX = False if os.name == "nt" else True
+_USE_POSIX = False if os.name == "nt" else True  # pylint: disable=R1719
 
 
 ACCESS_LOG_FMT = (
@@ -17,6 +18,10 @@ ACCESS_LOG_FMT = (
     + ' - "%(request_line)s" %(status_code)s'
 )
 DEFAULT_LOG_FMT = "%(asctime)s - %(levelprefix)s %(message)s"
+
+DEFAULT_SERVER_PORT = 5000
+DEFAULT_SERVER_ADDRESS = "127.0.0.1"
+DEFAULT_SERVER_URL = f"http://{DEFAULT_SERVER_ADDRESS}:{DEFAULT_SERVER_PORT}"
 
 
 # https://github.com/python/cpython/issues/82300
@@ -51,8 +56,8 @@ def remove_shm_from_resource_tracker():
 
 def launch(
     app: FastAPI,
-    address: str = "127.0.0.1",
-    port: int = 5000,
+    address: str = DEFAULT_SERVER_ADDRESS,
+    port: int = DEFAULT_SERVER_PORT,
     log_level: str = "info",
 ):
     """function for launchin a FastAPI app

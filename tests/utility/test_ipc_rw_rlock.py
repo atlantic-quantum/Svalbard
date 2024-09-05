@@ -1,5 +1,7 @@
 """Test our Inter-Process Read Write Recursive Lock"""
+
 import pytest
+
 from svalbard.utility.shared_array import InterProcessRWRLock
 
 

@@ -1,10 +1,12 @@
 """functions that are common between multiple test modules of the data server"""
+
 from pathlib import Path
 
 import numpy as np
+
 from svalbard.data_model.data_file import Data, DataFile
 from svalbard.data_model.ipc import BufferReference, MeasurementHandle
-from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
+from svalbard.data_model.memory_models import SharedMemoryIn
 from svalbard.data_server.data_backend.abstract_data_backend import AbstractDataBackend
 from svalbard.data_server.frontend.abstract_frontend import AbstractFrontend
 from svalbard.utility.resize_array import new_shape
@@ -61,7 +63,6 @@ async def save_buffer_test(
             l_data = l_data.data
         assert l_data is not None
         l_dataset = [dset for dset in l_data.datasets if dset.name == dataset.name][0]
-        [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
         return l_dataset.memory.shape
 
     current_shape = await _current_shape(caller, path)
@@ -78,9 +79,7 @@ async def save_buffer_test(
             new_shape(current_shape, slices, dataset.memory.shape)
             == l_dataset.memory.shape
         )
-    [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
-    SharedMemoryOut.close(new_buffer.name)
-    # assert np.all(buffer_data[slices] == l_dataset.memory.to_array()[slices])
+    assert np.all(buffer_data[*slices] == l_dataset.memory.to_array()[*slices])
 
 
 def sync_save_buffer_test(
@@ -105,7 +104,6 @@ def sync_save_buffer_test(
         assert l_data is not None
         assert isinstance(l_data, Data)
         l_dataset = [dset for dset in l_data.datasets if dset.name == dataset.name][0]
-        [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
         return l_dataset.memory.shape
 
     current_shape = _current_shape(caller, path)
@@ -128,9 +126,7 @@ def sync_save_buffer_test(
             new_shape(current_shape, slices, dataset.memory.shape)
             == l_dataset.memory.shape
         )
-    [SharedMemoryOut.close(dset.memory.name) for dset in l_data.datasets]
-    SharedMemoryOut.close(new_buffer.name)
-    # assert np.all(buffer_data[slices] == l_dataset.memory.to_array()[slices])
+    assert np.all(buffer_data[*slices] == l_dataset.memory.to_array()[*slices])
 
 
 def compare_data_in_datasets(dataset1: np.ndarray, dataset2: np.ndarray):

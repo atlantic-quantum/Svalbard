@@ -1,13 +1,14 @@
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+
 from svalbard.data_model.ipc import BufferReference, MeasurementHandle, SliceListModel
 from svalbard.utility.logger import logger
 
 from .utility import UvicornTestServer
 
 
-@pytest.fixture(name="callback_app")
+@pytest.fixture(name="callback_app", scope="session")
 def fixture_callback_app():
     """fixture for creating a fastAPI app that recieves callbacks"""
     app = FastAPI()
@@ -27,14 +28,13 @@ def fixture_callback_app():
     yield app
 
 
-@pytest_asyncio.fixture
-async def startup_and_shutdown_server(callback_app, capsys):
+@pytest_asyncio.fixture(name="startup_and_shutdown_server", scope="session")
+async def startup_and_shutdown_server(callback_app):
     """Start server as test fixture and tear down after test"""
     server = UvicornTestServer(callback_app)
     await server.bring_up()
     yield server
     await server.down()
-    # capsys.readouterr()
 
 
 @pytest.fixture(name="slice_list_model")

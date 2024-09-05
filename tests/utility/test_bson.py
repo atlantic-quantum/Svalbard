@@ -1,4 +1,5 @@
 """Test custom BSON codec"""
+
 import os
 import uuid
 from pathlib import Path, PosixPath, WindowsPath
@@ -8,6 +9,7 @@ from bson import BSON
 from bson.binary import Binary, UuidRepresentation
 from bson.codec_options import CodecOptions, TypeRegistry
 from bson.errors import InvalidDocument
+
 from svalbard.utility.bson import PosixPathCodec, decode, encode
 
 

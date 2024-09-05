@@ -1,6 +1,7 @@
 """
 Abstract base class that defines the Metadata Backend interface
 """
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 

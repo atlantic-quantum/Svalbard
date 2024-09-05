@@ -1,4 +1,5 @@
 """Utility function for resizing an zarr array"""
+
 import numpy as np
 
 

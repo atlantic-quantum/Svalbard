@@ -1,2 +1,0 @@
-aq_data
-tests

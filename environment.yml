@@ -1,29 +1,32 @@
 name: svalbard
 dependencies:
-  - python>=3.10,<3.12
-  - numpy
+  - python>=3.10
   - pip
   - pip:
-    - Flask-Testing
-    - build
-    - pytest
-    - pytest-cov
-    - pylint
-    - isort
-    - black
-    - flake8
-    - pytest-asyncio # for testing async modules
-    - pydantic==v1.10 # for creating datamodels
-    - pylint-pydantic # to make pylint behave with pydantic
+    - numpy<2.0
+    - scipy
     - motor # for async mongoDB
     - fsspec # for general filesystem like data backends
-    - gcsfs # for Google Cloud storage data backend
-    - zarr # for storing array data in the cloud
-    - fastapi # for creating an API for the data server
-    - uvicorn # for launching fastapi apps
-    - httpx # for async communication with fastapi apps 
-    - scipy
+    - gcsfs  # for Google Cloud storage data backend
+    - zarr  # for storing array data in the cloud
+    - fastapi  # for creating a rest API for the data server
+    - uvicorn  # for launching fastapi apps - this may be unneeded right now?
+    - httpx  # for async communication with fastapi apps 
+    - rustworkx 
+    - pydantic # for creating datamodels
     - asteval
-    - rustworkx
     - colorama
     - pandas
+    - deprecated
+    - build
+    - black
+    - pytest==8.1.1
+    - pytest-cov==4.1.0
+    - pylint
+    - isort
+    - flake8
+    - pytest-asyncio==0.23.6 # for testing async modules
+    - pylint-pydantic # to make pylint behave with pydantic
+    - pre-commit
+    - setproctitle
+    - orjson # fastapi and orjson are required for measurement executor

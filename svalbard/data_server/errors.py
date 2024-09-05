@@ -1,4 +1,5 @@
 """Custom Errors for the Data Server"""
+
 from ..data_model.ipc import MeasurementHandle
 from ..utility.logger import logger
 

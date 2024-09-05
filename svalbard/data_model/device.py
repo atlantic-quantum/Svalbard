@@ -1,14 +1,15 @@
 """
 Data models for devices, including serial number and designer
 """
-from typing import Literal
 
-from pydantic import BaseModel, Field, root_validator
+from typing import Literal, Self
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class DeviceInfo(BaseModel):
     """
-    Data model for a generic device
+    Data model for a generic device info
 
     Args:
         serial_number (str):
@@ -23,7 +24,7 @@ class DeviceInfo(BaseModel):
 
 
 class AtlanticDeviceInfo(DeviceInfo):
-    """Data model for a device from Atlantic Quantum
+    """Device info data model for a device from Atlantic Quantum
 
     Parameter description copied from slack discussion with Sergey
 
@@ -54,28 +55,32 @@ class AtlanticDeviceInfo(DeviceInfo):
     die: str = "unknown"
     model: Literal["atlantic"] = "atlantic"
 
-    @root_validator
-    def combine_info_to_serial(cls, values: dict) -> dict:
+    @model_validator(mode="after")
+    def combine_info_to_serial(self) -> Self:
         """
-        root_validator to combine the mask, wafer, chip, and die fields into a
+        model_validator to combine the mask, wafer, chip, and die fields into a
         serial number, called automatically during validation. Does not need to be
         called manually.
 
-        Args:
-            values (dict):
-                dictionary of constructor arguments (note that pydantic model
-                constructors are called with keyword arguments only)
-
         Returns:
-            dict: modified values dictionary with the serial_number field added
+            AtlanticDeviceInfo:
+                self, with the serial_number field updated to the combined fields
         """
-        values[
-            "serial_number"
-        ] = f"{values['mask']}-{values['wafer']}-{values['chip']}-{values['die']}"
-        return values
+        self.serial_number = f"{self.mask}-{self.wafer}-{self.chip}-{self.die}"
+        return self
 
 
 class Device(BaseModel):
+    """
+    Data model for a device
+
+    Args:
+        device_info (DeviceInfo | AtlanticDeviceInfo):
+            device info data model for the device, defaults to AtlanticDeviceInfo
+        device_designer (str):
+            name of the device designer, defaults to "atlantic"
+    """
+
     device_info: DeviceInfo | AtlanticDeviceInfo = Field(
         default_factory=AtlanticDeviceInfo, discriminator="model"
     )

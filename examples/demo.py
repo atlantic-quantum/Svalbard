@@ -9,14 +9,16 @@ If you have a .pem file with access to our mongoDB Atlas instance you will have 
 update the path to it in the data_server.json file. It is currently set to
 run of Brandur's Macbook Pro
 
-If you don't have access to GCS you can use the data_server_local.json config file 
+If you don't have access to GCS you can use the data_server_local.json config file
 instead of data_server.json
 """
+
 import asyncio
 import json
 
 import httpx
 import numpy as np
+
 from svalbard.data_model.data_file import Data, DataFile, MeasurementHandle, MetaData
 from svalbard.data_model.ipc import SavedPath
 from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
@@ -28,8 +30,9 @@ from svalbard.launch import remove_shm_from_resource_tracker
 # Open up a terminal, activate svalbard and navigate to the svalbard folder,
 # run docker-compose and navigate to the examples folder
 #
+# on Brandur's computer:
 #       conda activate svalbard
-#       cd navigate/to/the/repository/svalbard/
+#       cd Documents/Repositories/svalbard/
 #       docker-compose up -d
 #       cd examples
 #
@@ -84,18 +87,23 @@ def data_file():
 async def async_save_load_part():
     print("# Saving datafile:")
     datafile = data_file()
-    print(json.dumps(json.loads(datafile.json()), indent=4))
+    print(json.dumps(json.loads(datafile.model_dump_json()), indent=4))
     print("\n\n\n")
     input("Press enter to save datafile")
     print("# Starting async client to communicate")
     print(f"async with httpx.AsyncClient(base_url='{DATA_SERVER_URL}') as client:")
     async with httpx.AsyncClient(base_url=DATA_SERVER_URL) as client:
-        print("    response = await client.post('/data/save', content=datafile.json())")
-        response = await client.post("/data/save", content=datafile.json())
-        print("    path = SavedPath(**response.json()).path")
-        path = SavedPath(**response.json()).path
+        print(
+            "    response = await client.post('/data/save', ",
+            "content=datafile.model_dump_json())",
+        )
+        response = await client.post("/data/save", content=datafile.model_dump_json())
+        print("    path = SavedPath(**response.model_dump_json()).path")
+        path = SavedPath(**response.model_dump_json()).path
         print(f"    Data saved in mongo db with ObjectID: {path}")
         print("\n\n\n")
+        # param_list = {'slice_list': "[0:10], [[0:2],[0:2]]"}
+        # #list of slices for each dimension
         param_list = {
             "slice_list": "[[(0,2),(0,2)]]"
         }  # list of slices for each dimension
@@ -104,11 +112,11 @@ async def async_save_load_part():
         response = await client.get(
             f"/data/load_partial/{path}", params=param_list, timeout=20
         )
-        print("    l_datafile = DataFile(**response.json())")
-        l_datafile = DataFile(**response.json())
+        print("    l_datafile = DataFile(**response.model_dump_json())")
+        l_datafile = DataFile(**response.model_dump_json())
 
         print(f"    # Loaded datafile using ObjectID: {path}")
-        print(json.dumps(json.loads(l_datafile.json()), indent=4))
+        print(json.dumps(json.loads(l_datafile.model_dump_json()), indent=4))
 
         print("\n\n\n")
         print("Note how the loaded datafields points to the data with")
@@ -118,17 +126,20 @@ async def async_save_load_part():
 
         print("We can also see the saved and loaded data are the same")
         print(
-            "e.g. look at the first dataset (acccess DataFile.data.datasets[0].memory.to_array()[:4]"
+            "e.g. look at the first dataset ",
+            "(acccess DataFile.data.datasets[0].memory.to_array()[:4]",
         )
-        print(f"Saved:  {datafile.data.datasets[0].memory.to_array()[:4]}")  # type: ignore
-        print(f"loaded: {l_datafile.data.datasets[0].memory.to_array()[:4]}")  # type: ignore
+        # type: ignore
+        print(f"Saved:  {datafile.data.datasets[0].memory.to_array()[:4]}")
+        # type: ignore
+        print(f"loaded: {l_datafile.data.datasets[0].memory.to_array()[:4]}")
         print("\n\n\n")
 
-        print(l_datafile.data.datasets[-1].memory.to_array().shape)  # type: ignore
+        print(l_datafile.data.datasets[-1].memory.to_array().shape)
         print(
             np.all(
-                l_datafile.data.datasets[-1].memory.to_array()  # type: ignore
-                == datafile.data.datasets[-1].memory.to_array()  # type: ignore
+                l_datafile.data.datasets[-1].memory.to_array()
+                == datafile.data.datasets[-1].memory.to_array()
             )
         )
 
@@ -153,10 +164,11 @@ if __name__ == "__main__":
         print("# Setting up server with loaded config")
         print("# by using the '/data/setup' command to setup the data server")
         print(
-            f"httpx.post('{DATA_SERVER_URL}/data/setup;, content=data_server_cfg.json())"
+            f"httpx.post('{DATA_SERVER_URL}/data/setup;, ",
+            "content=data_server_cfg.model_dump_json())",
         )
         response = httpx.post(
-            f"{DATA_SERVER_URL}/data/setup", content=data_server_cfg.json()
+            f"{DATA_SERVER_URL}/data/setup", content=data_server_cfg.model_dump_json()
         )
         if response.status_code == 201:
             print("Setup successful")

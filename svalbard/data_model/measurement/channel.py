@@ -9,7 +9,7 @@ from enum import Enum
 
 import asteval
 import numpy as np
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ..instruments import InstrumentModel, InstrumentSetting, SettingType
 
@@ -76,9 +76,11 @@ class Channel(BaseModel):
 
     """
 
+    model_config = ConfigDict(ser_json_inf_nan="constants")
+
     name: str
     instrument_identity: str
-    instrument_setting_name: str  # insturment setting object instead?
+    instrument_setting_name: str  # instrument setting object instead?
     unit_physical: str
     gain: float = 1.0
     offset: float = 0.0
@@ -88,18 +90,60 @@ class Channel(BaseModel):
     limit_action: LimitAction = LimitAction.CONTINUE
     dtype: SettingType = SettingType.FLOAT
 
-    @validator("name")
+    @field_validator("name")
+    @classmethod
     def name_must_be_pythonic(cls, v):
         """
         Validator that checks that the name is pythonic (lowercase, no spaces,
         no special characters, not a reserved keyword).
         """
         if not asteval.valid_symbol_name(v):
-            raise ValueError("name must be a valid python symbol name")
+            v = cls.make_pythonic(v)
+            if not asteval.valid_symbol_name(v):
+                raise ValueError(f"{v} is not a valid python symbol name")
         return v
 
+    @field_validator("high_limit", mode="before")
     @classmethod
-    def from_instrument_model_and_setting(
+    def high_limit_validation(cls, h):
+        """
+        Validator that checks that the high_limit is set to np.inf if currently
+        None
+        """
+        if h is None:
+            return np.inf
+        return h
+
+    @field_validator("low_limit", mode="before")
+    @classmethod
+    def low_limit_validation(cls, h):
+        """
+        Validator that checks that the low_limit is set to -np.inf if currently None
+        """
+        if h is None:
+            return -np.inf
+        return h
+
+    @staticmethod
+    def make_pythonic(name: str) -> str:
+        """Makes name a valid python variable name
+
+        Args:
+            name: name to be made valid
+
+        Returns:
+            Valid name
+        """
+        return (
+            name.replace(".", "_")
+            .replace("$", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
+            .replace("-", "_")
+        )
+
+    @classmethod
+    def from_instrument_model_and_setting(  # pylint: disable=too-many-arguments
         cls,
         name: str,
         model: InstrumentModel,
@@ -143,12 +187,7 @@ class Channel(BaseModel):
                 InstrumentSetting is used.
 
         """
-        if setting.name not in model.settings.keys():
-            estr = (
-                f"Setting {setting.name} not in"
-                + f" instrument model {model.identity} settings"
-            )
-            raise ValueError(estr)
+        model.get_setting(setting.name)  # raises value error if setting does not exist
         if isinstance(dtype, str):
             dtype = SettingType(dtype)
         return Channel(
@@ -220,3 +259,48 @@ class Channel(BaseModel):
         return label with unit for the channel
         """
         return f"{self.name} ({self.unit_physical})"
+
+    @staticmethod
+    def default_name(instrument_id: str, setting_name: str) -> str:
+        """
+        Create a default channel name from the instrument id and setting name
+
+        Args:
+            instrument_id (str): identity of the instrument
+            setting_name (str): name of the setting
+
+        Returns:
+            str: default channel name in the form of "{instrument_id}___{setting_name}"
+        """
+        return f"{instrument_id}___{setting_name}"
+
+    @staticmethod
+    def get_instrument_and_setting(default_channel_name: str) -> tuple[str, str]:
+        """
+        Get the instrument identity and setting name from the default channel name
+
+        Args:
+            default_channel_name (str): default channel name
+
+        Returns:
+            tuple[str, str]: instrument identity and setting name
+
+        Raises:
+            ValueError: if the channel name is not in the form
+                {instrument_id}___{setting_name}
+        """
+        split_name = default_channel_name.split("___", 1)
+        if len(split_name) != 2:
+            # fall back on the old format (split on '/') for backwards compatibility
+            # ! revert to new format once aq_measurement master is updatad
+            split_name = default_channel_name.split("/", 1)
+            if len(split_name) != 2:
+                raise ValueError(
+                    f"Channel name {default_channel_name} is not in the form"
+                    + " {instrument_id}/{setting_name}"
+                )
+            # raise ValueError(
+            #     f"Channel name {default_channel_name} is not in the form"
+            #     + " {instrument_id}___{setting_name}"
+            # )
+        return split_name[0], split_name[1]

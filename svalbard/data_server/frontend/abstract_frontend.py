@@ -1,6 +1,7 @@
 """
 Abstract base class that defines the Front end interface.
 """
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -80,12 +81,12 @@ class AbstractFrontend(ABC):
         """
 
     @abstractmethod
-    async def update_metadata(self, path: Path, metadata: DataFile):
-        """Updates metadata at path with new metadata
+    async def update_metadata(self, path: Path, data_file: DataFile):
+        """Updates metadata at path with new metadata from data_file
 
         Args:
             path (Path): path to metadata to be updated
-            metadata (BaseMetaData): new metadata
+            data_file (DataFile): DataFile with new metadata
 
         Raises:
             FileNotFoundError: if no metadata is found at path
@@ -93,12 +94,12 @@ class AbstractFrontend(ABC):
 
     @abstractmethod
     async def update_data(
-        self, data: DataFile, slice_lists: list[list[slice]] | None = None
+        self, data_file: DataFile, slice_lists: list[list[slice]] | None = None
     ):
-        """Updates data at path with new data
+        """Updates data at path with new data from data_file
 
         Args:
-            data (DataFile): new data
+            data_file (DataFile): DataFile with new data
 
         Raises:
             FileNotFoundError: if no data is found at path
@@ -108,14 +109,14 @@ class AbstractFrontend(ABC):
     async def update(
         self,
         path: Path,
-        datafile: DataFile,
+        data_file: DataFile,
         slice_lists: list[list[slice]] | None = None,
     ):
         """Updates both metadata at path and data with new datafile
 
         Args:
             path (Path): path to datafile to be updated
-            datafile (DataFile): new datafile
+            data_file (DataFile): new data file
 
         Raises:
             FileNotFoundError: if no datafile is found at path
@@ -190,7 +191,7 @@ class AbstractFrontend(ABC):
         """
 
     @abstractmethod
-    async def save_buffer(
+    async def save_buffer(  # pylint: disable=too-many-arguments
         self,
         handle: MeasurementHandle,
         name: str,

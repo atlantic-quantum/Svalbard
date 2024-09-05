@@ -1,4 +1,5 @@
-"""Synchronous frontend for the data server."""
+"""Synchronous Frontend for DataServer, based on FrontendV1"""
+
 import asyncio
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from .frontend_v1 import (
 
 
 class SyncFrontendV1(FrontendV1):
+    """Synchronous Frontend for DataServer, based on FrontendV1"""
+
     def __init__(
         self,
         data_backend: AbstractDataBackend,
@@ -25,6 +28,7 @@ class SyncFrontendV1(FrontendV1):
 
     @property
     def loop(self):
+        """Returns the asyncio event loop used by the frontend"""
         return self._loop
 
     @sync_wrapper
@@ -57,7 +61,7 @@ class SyncFrontendV1(FrontendV1):
     ):
         return await super().update_data(data_file, slice_lists)
 
-    def update(
+    def update(  # pylint: disable=W0236
         self,
         path: Path,
         data_file: DataFile,
@@ -77,7 +81,7 @@ class SyncFrontendV1(FrontendV1):
         return await super().prepare_stream(handle, datafile)
 
     @sync_wrapper
-    async def save_buffer(
+    async def save_buffer(  # pylint: disable=too-many-arguments
         self,
         handle: MeasurementHandle,
         name: str,
@@ -99,5 +103,7 @@ class SyncFrontendV1(FrontendV1):
 
 
 class SyncFrontendV1Config(FrontendV1Config):
+    """Configuration for Sync Frontend V1"""
+
     def init(self) -> SyncFrontendV1:
         return SyncFrontendV1(self.data_backend.init(), self.metadata_backend.init())

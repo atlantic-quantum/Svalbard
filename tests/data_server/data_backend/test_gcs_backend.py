@@ -1,10 +1,10 @@
 """Test Google Cloud Storage based Data Backend"""
 
-
 import pytest
 import pytest_asyncio
 from gcsfs import GCSFileSystem
 from gcsfs.retry import HttpError
+
 from svalbard.data_server.data_backend.gcs_backend import GCSBackendConfig
 
 from . import test_fs_backend as backend_tests
@@ -30,7 +30,7 @@ class TestGCSBackend(backend_tests.TestFSBackendWithStreaming):
 class TestGCSBackendFromConfig(backend_tests.FSBackendTests):
     """Test FSBackend created from config"""
 
-    @pytest_asyncio.fixture(name="backend")
+    @pytest_asyncio.fixture(name="backend", scope="class")
     async def fixture_gcs_backend_config(
         self, gcs_config: GCSBackendConfig, gcs_filesystem: GCSFileSystem, test_bucket
     ):

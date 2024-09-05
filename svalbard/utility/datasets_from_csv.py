@@ -1,13 +1,18 @@
-"""Method for creating a list of DataSets from a csv file."""
+"""
+Method to create a list of DataSets from a csv of simulation results.
+
+"""
+
 from pathlib import Path
 
 import pandas as pd
+
 from svalbard.data_model.data_file import Data
 
 
 def datasets_from_csv(results: Path) -> list[Data.DataSet]:
     """
-    Creates a list of DataSets from a csv file.
+    Creates a list of DataSets from a csv of simulation results.
 
     Args:
         results (Path):

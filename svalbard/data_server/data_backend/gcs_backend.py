@@ -1,7 +1,9 @@
 """Data Storage Backend that uses Google Cloud Storage"""
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePath, PurePosixPath
+from typing import Literal
 
 import zarr
 from gcsfs import GCSFileSystem
@@ -18,7 +20,7 @@ class GCSBackend(FSBackend):
         filesystem: GCSFileSystem,
         executor: ThreadPoolExecutor | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
-        path_base: Path = ...,
+        path_base: Path = Path("/"),
     ) -> None:
         super().__init__(filesystem, executor, loop, path_base)
         self.filesystem.ls(
@@ -32,7 +34,7 @@ class GCSBackend(FSBackend):
 
     async def _create_group(self, path: PurePath) -> zarr.Group:
         self.logger.debug(
-            f"GCSBackend: Creating group at path : {PurePosixPath(path.as_posix())}"
+            "GCSBackend: Creating group at path : %s", PurePosixPath(path.as_posix())
         )
         return await super()._create_group(PurePosixPath(path.as_posix()))
 
@@ -53,6 +55,7 @@ class GCSBackend(FSBackend):
         )
 
     async def _ls(self, path: PurePath) -> list[Path]:
+        # pylint: disable=protected-access
         files = await self.filesystem._ls(str(path.as_posix()), detail=False)
         return [PurePosixPath(file) for file in files]  # type: ignore
 
@@ -106,7 +109,7 @@ class GCSBackendConfig(FSBackendConfig):
     """
 
     cls: str = "gcsfs.core.GCSFileSystem"
-    protocol: str = "gcs"
+    protocol: Literal["gcs"] = "gcs"
     args: list = []
     path: Path = Path("/")
     project: str = GCSFS_DEFAULT_PROJECT  # GCS project_id (not project name)
@@ -116,4 +119,7 @@ class GCSBackendConfig(FSBackendConfig):
     timeout: float | None = None
 
     def init(self) -> FSBackend:
-        return GCSBackend(GCSFileSystem.from_json(self.json()), path_base=self.path)
+        return GCSBackend(self.filesystem(), path_base=self.path)
+
+    def filesystem(self) -> GCSFileSystem:
+        return GCSFileSystem.from_json(self.model_dump_json())

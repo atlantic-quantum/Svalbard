@@ -1,4 +1,5 @@
 """Test ipc pydantic models"""
+
 import uuid
 
 from svalbard.data_model.ipc import MeasurementHandle, SliceListModel, SliceModel
@@ -19,7 +20,7 @@ def test_measurement_handle():
     assert meas_handle == meas_handle3
     assert isinstance(meas_handle3.handle, uuid.UUID)
 
-    meas_handle4 = MeasurementHandle(**meas_handle.dict())
+    meas_handle4 = MeasurementHandle(**meas_handle.model_dump())
     assert meas_handle == meas_handle4
 
     meas_handle5 = MeasurementHandle(handle=uuid.UUID(str(meas_handle.handle)))

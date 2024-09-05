@@ -1,4 +1,5 @@
 """General fsspec based data backend"""
+
 import asyncio
 import logging
 import uuid
@@ -6,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from functools import lru_cache, partial
 from pathlib import Path, PurePath
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
 import numpy as np
 import zarr
@@ -261,7 +262,7 @@ class FSBackend(AbstractDataBackend):
         self.logger.debug("Save buffer call verified")
         return True
 
-    async def save_buffer(
+    async def save_buffer(  # pylint: disable=too-many-arguments
         self,
         handle: MeasurementHandle,
         name: str,
@@ -581,7 +582,7 @@ class FSBackendConfig(AbstractDataBackendConfig):
     # todo fix model loading instead of hacking all parameters gcs config in here
 
     cls: str = "fsspec.implementations.memory.MemoryFileSystem"
-    protocol: str = "memory"
+    protocol: Literal["memory", "local"] = "memory"
     args: list = []
     path: Path = Path("/")
     project: str = ""  #
@@ -591,4 +592,8 @@ class FSBackendConfig(AbstractDataBackendConfig):
     timeout: float | None = None
 
     def init(self) -> FSBackend:
-        return FSBackend(AbstractFileSystem.from_json(self.json()), path_base=self.path)
+        return FSBackend(self.filesystem(), path_base=self.path)
+
+    def filesystem(self) -> AbstractFileSystem:
+        """Creates a filesystem from the configuration"""
+        return AbstractFileSystem.from_json(self.model_dump_json())

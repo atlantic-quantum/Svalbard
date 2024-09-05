@@ -1,3 +1,25 @@
-__all__ = ["data_file", "ipc", "memory_models", "measurement"]
+"""
+Initialize the data_model sub module.
+"""
 
-from . import data_file, ipc, measurement, memory_models
+__all__ = [
+    "compiler",
+    "data_file",
+    "device",
+    "instruments",
+    "ipc",
+    "measurement",
+    "memory_models",
+    "utility",
+]
+
+from . import (
+    compiler,
+    data_file,
+    device,
+    instruments,
+    ipc,
+    measurement,
+    memory_models,
+    utility,
+)

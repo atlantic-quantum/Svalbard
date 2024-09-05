@@ -3,6 +3,7 @@ import json
 import bson
 import numpy as np
 import pytest
+
 from svalbard.data_model.measurement.lookup import LookupInterpolation, LookupTable
 
 
@@ -17,7 +18,7 @@ def fixture_lookup_table():
 
 def test_lookup_table_bson(lookup_table: LookupTable):
     """Test that DataFile can be converted to bson"""
-    bson_encoded = bson.BSON.encode(json.loads(lookup_table.json()))
+    bson_encoded = bson.BSON.encode(json.loads(lookup_table.model_dump_json()))
     assert bson_encoded is not None
     bson_decoded = bson.BSON(bson_encoded).decode()
     new_lookup_table = LookupTable(**bson_decoded)

@@ -1,5 +1,7 @@
 """Test determining new_shape for chunked array"""
+
 import pytest
+
 from svalbard.utility.resize_array import new_shape
 
 # todo loop over random shapes

@@ -3,6 +3,7 @@ import json
 import bson
 import numpy as np
 import pytest
+
 from svalbard.data_model.measurement.lookup import LookupTable
 from svalbard.data_model.measurement.relation import (
     RelationParameters,
@@ -22,7 +23,7 @@ def test_relation_parameters():
 
 def test_relation_parameters_bson():
     parameter = RelationParameters(variable="x", source_name="y")
-    bson_encoded = bson.BSON.encode(json.loads(parameter.json()))
+    bson_encoded = bson.BSON.encode(json.loads(parameter.model_dump_json()))
     assert bson_encoded is not None
     bson_decoded = bson.BSON(bson_encoded).decode()
     new_parameter = RelationParameters(**bson_decoded)
@@ -54,7 +55,7 @@ def test_relation_parameters_with_lookup_bson():
             x=np.array([1, 2, 3]), y=np.array([4, 5, 6])
         ),
     )
-    bson_encoded = bson.BSON.encode(json.loads(parameter.json()))
+    bson_encoded = bson.BSON.encode(json.loads(parameter.model_dump_json()))
     assert bson_encoded is not None
     bson_decoded = bson.BSON(bson_encoded).decode()
     new_parameter = RelationParameters(**bson_decoded)
@@ -91,7 +92,7 @@ def test_relation_settings():
     )
     assert np.allclose(values3, np.array([5, 7, 9]))
 
-    bson_encoded = bson.BSON.encode(json.loads(relation.json()))
+    bson_encoded = bson.BSON.encode(json.loads(relation.model_dump_json()))
     assert bson_encoded is not None
     bson_decoded = bson.BSON(bson_encoded).decode()
     new_relation = RelationSettings(**bson_decoded)
@@ -123,3 +124,8 @@ def test_remove_parameter():
     assert relation.parameters
     relation.remove_parameter("x")
     assert not relation.parameters
+
+
+def test_relation_param_name_pythonic():
+    rel_param = RelationParameters(variable="x2", source_name="var 1")
+    assert rel_param.source_name == "var_1"

@@ -1,4 +1,5 @@
 """Frontend for DataServer"""
+
 import asyncio
 import logging
 import uuid
@@ -6,7 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import Coroutine
 
-from pydantic import validator
+from pydantic import Field
 
 from ...data_model.data_file import DataFile, MeasurementHandle
 from ...data_model.ipc import BufferReference
@@ -38,11 +39,11 @@ class FrontendV1(AbstractFrontend):
         self._tracked_tasks: dict[uuid.UUID, asyncio.Task] = {}
 
     @property
-    def data_backend(self):
+    def data_backend(self) -> AbstractDataBackend:
         return self._data_backend
 
     @property
-    def metadata_backend(self):
+    def metadata_backend(self) -> AbstractMetadataBackend:
         return self._metadata_backend
 
     @property
@@ -68,8 +69,8 @@ class FrontendV1(AbstractFrontend):
         return self._tracked_tasks
 
     def save_callback(self):
+        """Callback for when a file has finished saving"""
         self.logger.debug("File has finished saving")
-        return
 
     async def save(self, datafile: DataFile) -> tuple[Path, asyncio.Task | None]:
         """Save a datafile to the backend and return the metadata path and save_task.
@@ -173,7 +174,7 @@ class FrontendV1(AbstractFrontend):
             raise StreamNotPreparedError(handle, self.__class__.__name__)
         self.data_backend.validate_save_buffer_call(handle, name, buffer, index)
 
-    async def save_buffer(
+    async def save_buffer(  # pylint: disable=too-many-arguments
         self,
         handle: MeasurementHandle,
         name: str,
@@ -249,6 +250,7 @@ class FrontendV1(AbstractFrontend):
         task.add_done_callback(remove_task)
 
     async def complete_background_tasks(self):
+        """Waits for all background tasks to complete"""
         self.logger.debug("Completing background tasks")
         tasks = list(self.background_tasks)
         for task in tasks:
@@ -258,16 +260,8 @@ class FrontendV1(AbstractFrontend):
 class FrontendV1Config(AbstractFrontendConfig):
     """Configuration for Frontend V1"""
 
-    data_backend: FSBackendConfig | GCSBackendConfig
+    data_backend: FSBackendConfig | GCSBackendConfig = Field(discriminator="protocol")
     metadata_backend: MongoDBConfig
-
-    # todo use field discriminators instead of this hack
-    # https://docs.pydantic.dev/usage/types/#discriminated-unions-aka-tagged-unions
-    @validator("data_backend")
-    def cast_data_backend(cls, data_backend: FSBackendConfig | GCSBackendConfig):
-        if data_backend.protocol == "gcs":
-            return GCSBackendConfig(**data_backend.dict())
-        return data_backend
 
     def init(self) -> FrontendV1:
         return FrontendV1(self.data_backend.init(), self.metadata_backend.init())

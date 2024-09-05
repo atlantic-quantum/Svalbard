@@ -1,6 +1,7 @@
 """
 Abstract base class that defines the Data Backend interface
 """
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -189,7 +190,7 @@ class AbstractDataBackend(ABC):
         """
 
     @abstractmethod
-    async def save_buffer(
+    async def save_buffer(  # pylint: disable=too-many-arguments
         self,
         handle: MeasurementHandle,
         name: str,

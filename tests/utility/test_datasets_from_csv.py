@@ -2,6 +2,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+
 from svalbard.data_model.data_file import Data
 from svalbard.utility.datasets_from_csv import datasets_from_csv
 

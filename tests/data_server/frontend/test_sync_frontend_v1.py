@@ -2,6 +2,7 @@
     a. Mongo DB metadata + fsspec FileSystem data backends
     b. Mongo DB metadata + GCS data backends
 """
+
 import filecmp
 import time
 from pathlib import Path
@@ -12,13 +13,10 @@ from fsspec.asyn import get_loop
 from fsspec.implementations.memory import MemoryFileSystem
 from gcsfs import GCSFileSystem
 from gcsfs.retry import HttpError
+
 from svalbard.data_model.data_file import Data, DataFile, MeasurementHandle, MetaData
 from svalbard.data_model.ipc import BufferReference
-from svalbard.data_model.memory_models import (
-    SharedMemoryIn,
-    SharedMemoryOut,
-    __memory_reference__,
-)
+from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
 from svalbard.data_server.data_backend.fs_backend import FSBackend
 from svalbard.data_server.errors import (
     StreamAlreadyPreparedError,
@@ -91,18 +89,14 @@ def test_end_to_end_save_load(server_address):
             dataset.memory.name != l_dataset.memory.name
         )  # data and loaded data should not be in the same shared memeory
         assert np.all(dataset.memory.to_array() == l_dataset.memory.to_array())
-        SharedMemoryOut.close(l_dataset.memory.name)
     # cleanup to have the test not leave files, should not be done in production
     try:
         mfs.rm(str(path_base), recursive=True)
     except FileNotFoundError:
         pass
 
-    SharedMemoryOut.close(smo.name)
-
 
 def test_end_to_end_streaming(server_address):
-    event_loop = get_loop()
     """End to end streaming test
     that contains all the steps instead of using fixture"""
     handle = MeasurementHandle.new()
@@ -130,10 +124,7 @@ def test_end_to_end_streaming(server_address):
     datafile = DataFile(data=data, metadata=mdata)
 
     # create array with data to stream from
-    data_sizes = [
-        (10, 10),
-        (10, 5, 2),
-    ]
+    data_sizes: list[tuple[int, ...]] = [(10, 10), (10, 5, 2)]
     streamed_data = [np.arange(np.prod(shape)).reshape(shape) for shape in data_sizes]
 
     # create the frontend
@@ -148,7 +139,7 @@ def test_end_to_end_streaming(server_address):
     mfs = MemoryFileSystem()
     path_base = Path("memory:/tmp/test/fs_backend")
     # event loop is a asyncio loop createdd for tests marked asyncio
-    data_backend = FSBackend(mfs, loop=event_loop, path_base=path_base)
+    data_backend = FSBackend(mfs, loop=get_loop(), path_base=path_base)
     # finally create the frontend
     frontend = SyncFrontendV1(data_backend=data_backend, metadata_backend=mdb_backend)
 
@@ -179,15 +170,12 @@ def test_end_to_end_streaming(server_address):
         assert streamed.shape == l_dataset.memory.shape
         assert dataset.memory.dtype == l_dataset.memory.dtype
         assert np.all(streamed == l_dataset.memory.to_array())
-        SharedMemoryOut.close(l_dataset.memory.name)
 
     # cleanup to have the test not leave files, should not be done in production
     try:
         mfs.rm(str(path_base), recursive=True)
     except FileNotFoundError:
         pass
-
-    [SharedMemoryOut.close(br.name) for br in buffer_references]
 
 
 @pytest.mark.asyncio
@@ -210,7 +198,7 @@ async def test_init_frontend_fs_from_config(
 class SyncFrontendV1Tests:
     """Class for testing data server frontend v1 and it's subclasses"""
 
-    @pytest.fixture(name="frontend")
+    @pytest.fixture(name="frontend", scope="class")
     def frontend_v1_fs(self, sync_frontend_mdb_fs: SyncFrontendV1):
         """Fixture that yields a frontend,
         used for subclassing multiple Test SyncFrontendV1 classes"""
@@ -230,10 +218,6 @@ class SyncFrontendV1Tests:
         assert l_data_file.data is not None
         assert l_data_file.data.handle == data_file.data.handle
         assert_datasets_match(l_data_file.data.datasets, data_file.data.datasets)
-        [
-            SharedMemoryOut.close(dataset.memory.name)
-            for dataset in l_data_file.data.datasets
-        ]
 
     def test_save_partial_load(self, frontend: SyncFrontendV1, data_file: DataFile):
         """Test Saving and Partially Loading DataFile"""
@@ -254,10 +238,6 @@ class SyncFrontendV1Tests:
         assert_partial_datasets_match(
             data_file.data.datasets, l_data_file.data.datasets, slice_lists
         )
-        [
-            SharedMemoryOut.close(dataset.memory.name)
-            for dataset in l_data_file.data.datasets
-        ]
 
     def test_save_load_files(self, frontend: SyncFrontendV1, data_file: DataFile):
         """Test saving and loading files from DataFile Data"""
@@ -311,10 +291,11 @@ class SyncFrontendV1Tests:
         """Test closing data in DataFile"""
         assert data_file.data
         for dataset in data_file.data.datasets:
-            assert dataset.memory.name in __memory_reference__
+            dataset.memory.to_array()
         frontend.close(data_file)
         for dataset in data_file.data.datasets:
-            assert dataset.memory.name not in __memory_reference__
+            with pytest.raises(FileNotFoundError):
+                dataset.memory.to_array()
 
     def test_save_load_only_metadata(
         self, frontend: SyncFrontendV1, data_file: DataFile
@@ -378,8 +359,6 @@ class SyncFrontendV1Tests:
                 == l_dataset.memory.to_array()[tuple(slice_list)]
             )
 
-        frontend.close(datafile=data_file)
-
 
 class TestSyncFrontendV1WithStreaming(SyncFrontendV1Tests):
     """Streaming Tests for Frontend V1"""
@@ -403,31 +382,6 @@ class TestSyncFrontendV1WithStreaming(SyncFrontendV1Tests):
         buffer_references: list[BufferReference],
     ):
         """Test preaparing stream saving buffers in a random order
-        and finalizing stream"""
-        for save_buffer in self.streaming_test_generator(
-            frontend, streamed_data_file, buffer_references, (10,), random=True
-        ):
-            save_buffer
-
-    def test_streaming_1d_gather(
-        self,
-        frontend: SyncFrontendV1,
-        streamed_data_file: DataFile,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preaparing stream saving buffers asynchronously and finalizing stream"""
-        for save_buffer in self.streaming_test_generator(
-            frontend, streamed_data_file, buffer_references, (10,)
-        ):
-            save_buffer
-
-    def test_streaming_1d_gather_random(
-        self,
-        frontend: SyncFrontendV1,
-        streamed_data_file: DataFile,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preaparing stream saving buffers asynchronously, in random order,
         and finalizing stream"""
         for save_buffer in self.streaming_test_generator(
             frontend, streamed_data_file, buffer_references, (10,), random=True
@@ -511,7 +465,6 @@ class TestSyncFrontendV1WithStreaming(SyncFrontendV1Tests):
 
         assert len(l_data.data.datasets) == len(buffer_references)  # type: ignore
         assert isinstance(l_data.data, Data)
-        [SharedMemoryOut.close(dataset.memory.name) for dataset in l_data.data.datasets]
         buffer_data = buffer_upload_data(buffer_references, size)
         arr = np.arange(np.prod(size)).reshape(size)
         if random:
@@ -544,13 +497,12 @@ class TestSyncFrontendV1WithStreaming(SyncFrontendV1Tests):
 
         frontend.finalize_stream(streamed_data_file.data.handle)
         assert isinstance(l_data.data, Data)
-        [SharedMemoryOut.close(dataset.memory.name) for dataset in l_data.data.datasets]
 
 
 class TestSyncFrontendV1GCS(TestSyncFrontendV1WithStreaming):
     """Class for testing data server frontend v1 with Mongo DB and GCS Backends"""
 
-    @pytest.fixture(name="frontend")
+    @pytest.fixture(name="frontend", scope="class")
     def frontend_v1_gcs(self, sync_frontend_mdb_gcs: SyncFrontendV1):
         """Fixture that yields a frontend,
         with a Mongo DB metadata backend and a GCS data backend"""

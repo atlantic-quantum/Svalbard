@@ -1,8 +1,10 @@
 """Testing of MongoDB Backend"""
+
 from pathlib import Path
 
 import pytest
 from bson.objectid import ObjectId
+
 from svalbard.data_model.data_file import MeasurementHandle, MetaData
 from svalbard.data_server.errors import (
     StreamAlreadyPreparedError,

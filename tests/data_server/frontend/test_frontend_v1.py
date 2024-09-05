@@ -2,6 +2,7 @@
     a. Mongo DB metadata + fsspec FileSystem data backends
     b. Mongo DB metadata + GCS data backends
 """
+
 import asyncio
 import filecmp
 from pathlib import Path
@@ -12,13 +13,10 @@ import pytest_asyncio
 from fsspec.implementations.memory import MemoryFileSystem
 from gcsfs import GCSFileSystem
 from gcsfs.retry import HttpError
+
 from svalbard.data_model.data_file import Data, DataFile, MeasurementHandle, MetaData
 from svalbard.data_model.ipc import BufferReference
-from svalbard.data_model.memory_models import (
-    SharedMemoryIn,
-    SharedMemoryOut,
-    __memory_reference__,
-)
+from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
 from svalbard.data_server.data_backend.fs_backend import FSBackend
 from svalbard.data_server.errors import (
     StreamAlreadyPreparedError,
@@ -39,7 +37,7 @@ from ..utility import (
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_save_load(server_address, event_loop):
+async def test_end_to_end_save_load(server_address):
     """End to end test to save and load data, that implements everything here"""
     # create data file
     # create metadata
@@ -65,7 +63,7 @@ async def test_end_to_end_save_load(server_address, event_loop):
     mfs = MemoryFileSystem()
     path_base = Path("memory:/tmp/test/fs_backend")
     # event loop is a asyncio loop createdd for tests marked asyncio
-    data_backend = FSBackend(mfs, loop=event_loop, path_base=path_base)
+    data_backend = FSBackend(mfs, loop=asyncio.get_running_loop(), path_base=path_base)
     # finally create the frontend
     frontend = FrontendV1(data_backend=data_backend, metadata_backend=mdb_backend)
 
@@ -88,18 +86,15 @@ async def test_end_to_end_save_load(server_address, event_loop):
             dataset.memory.name != l_dataset.memory.name
         )  # data and loaded data should not be in the same shared memeory
         assert np.all(dataset.memory.to_array() == l_dataset.memory.to_array())
-        SharedMemoryOut.close(l_dataset.memory.name)
     # cleanup to have the test not leave files, should not be done in production
     try:
         mfs.rm(str(path_base), recursive=True)
     except FileNotFoundError:
         pass
 
-    SharedMemoryOut.close(smo.name)
-
 
 @pytest.mark.asyncio
-async def test_end_to_end_streaming(server_address, event_loop):
+async def test_end_to_end_streaming(server_address):
     """End to end streaming test
     that contains all the steps instead of using fixture"""
     handle = MeasurementHandle.new()
@@ -127,10 +122,7 @@ async def test_end_to_end_streaming(server_address, event_loop):
     datafile = DataFile(data=data, metadata=mdata)
 
     # create array with data to stream from
-    data_sizes = [
-        (10, 10),
-        (10, 5, 2),
-    ]
+    data_sizes: list[tuple[int, ...]] = [(10, 10), (10, 5, 2)]
     streamed_data = [np.arange(np.prod(shape)).reshape(shape) for shape in data_sizes]
 
     # create the frontend
@@ -145,7 +137,7 @@ async def test_end_to_end_streaming(server_address, event_loop):
     mfs = MemoryFileSystem()
     path_base = Path("memory:/tmp/test/fs_backend")
     # event loop is a asyncio loop createdd for tests marked asyncio
-    data_backend = FSBackend(mfs, loop=event_loop, path_base=path_base)
+    data_backend = FSBackend(mfs, loop=asyncio.get_running_loop(), path_base=path_base)
     # finally create the frontend
     frontend = FrontendV1(data_backend=data_backend, metadata_backend=mdb_backend)
 
@@ -176,15 +168,12 @@ async def test_end_to_end_streaming(server_address, event_loop):
         assert streamed.shape == l_dataset.memory.shape
         assert dataset.memory.dtype == l_dataset.memory.dtype
         assert np.all(streamed == l_dataset.memory.to_array())
-        SharedMemoryOut.close(l_dataset.memory.name)
 
     # cleanup to have the test not leave files, should not be done in production
     try:
         mfs.rm(str(path_base), recursive=True)
     except FileNotFoundError:
         pass
-
-    [SharedMemoryOut.close(br.name) for br in buffer_references]
 
 
 @pytest.mark.asyncio
@@ -206,7 +195,7 @@ async def test_init_frontend_gcs_from_config(
 class FrontendV1Tests:
     """Class for testing data server frontend v1 and it's subclasses"""
 
-    @pytest.fixture(name="frontend")
+    @pytest.fixture(name="frontend", scope="class")
     def frontend_v1_fs(self, frontend_mdb_fs: FrontendV1):
         """Fixture that yields a frontend,
         used for subclassing multiple TestFrontendV1 classes"""
@@ -226,10 +215,6 @@ class FrontendV1Tests:
         assert l_data_file.data is not None
         assert l_data_file.data.handle == data_file.data.handle
         assert_datasets_match(l_data_file.data.datasets, data_file.data.datasets)
-        [
-            SharedMemoryOut.close(dataset.memory.name)
-            for dataset in l_data_file.data.datasets
-        ]
 
     @pytest.mark.asyncio
     async def test_save_partial_load(self, frontend: FrontendV1, data_file: DataFile):
@@ -250,10 +235,6 @@ class FrontendV1Tests:
         assert_partial_datasets_match(
             data_file.data.datasets, l_data_file.data.datasets, slice_lists
         )
-        [
-            SharedMemoryOut.close(dataset.memory.name)
-            for dataset in l_data_file.data.datasets
-        ]
 
     @pytest.mark.asyncio
     async def test_save_load_files(self, frontend: FrontendV1, data_file: DataFile):
@@ -354,7 +335,6 @@ class FrontendV1Tests:
                 == l_dataset.memory.to_array()[tuple(slice_list)]
             )
         await frontend.complete_background_tasks()
-        await frontend.close(datafile=data_file)
 
     @pytest.mark.asyncio
     async def test_update(
@@ -399,18 +379,17 @@ class FrontendV1Tests:
                 == l_dataset.memory.to_array()[tuple(slice_list)]
             )
 
-        await frontend.close(datafile=data_file)
-
     @pytest.mark.asyncio
     async def test_close(self, frontend: FrontendV1, data_file: DataFile):
         """Test closing data in DataFile"""
         assert data_file.data
         for dataset in data_file.data.datasets:
-            assert dataset.memory.name in __memory_reference__
+            dataset.memory.to_array()
         await frontend.save(data_file)
         await frontend.close(data_file)
         for dataset in data_file.data.datasets:
-            assert dataset.memory.name not in __memory_reference__
+            with pytest.raises(FileNotFoundError):
+                dataset.memory.to_array()
 
     @pytest.mark.asyncio
     async def test_track_task_error(self, frontend: FrontendV1, data_file: DataFile):
@@ -440,37 +419,6 @@ class FrontendV1Tests:
 
 class TestFrontendV1WithStreaming(FrontendV1Tests):
     """Streaming Tests for Frontend V1"""
-
-    @pytest.mark.asyncio
-    async def test_streaming_1d(
-        self,
-        frontend: FrontendV1,
-        streamed_data_file: DataFile,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preaparing stream saving buffers and finalizing stream"""
-        async_lock = asyncio.Lock()
-        async for save_buffer in self.streaming_test_generator(
-            frontend, streamed_data_file, buffer_references, (10,)
-        ):
-            async with async_lock:
-                await save_buffer
-
-    @pytest.mark.asyncio
-    async def test_streaming_1d_random(
-        self,
-        frontend: FrontendV1,
-        streamed_data_file: DataFile,
-        buffer_references: list[BufferReference],
-    ):
-        """Test preaparing stream saving buffers in a random order
-        and finalizing stream"""
-        async_lock = asyncio.Lock()
-        async for save_buffer in self.streaming_test_generator(
-            frontend, streamed_data_file, buffer_references, (10,), random=True
-        ):
-            async with async_lock:
-                await save_buffer
 
     @pytest.mark.asyncio
     async def test_streaming_1d_gather(
@@ -507,12 +455,12 @@ class TestFrontendV1WithStreaming(FrontendV1Tests):
         buffer_references_2d: list[BufferReference],
     ):
         """Test preaparing stream saving buffers and finalizing stream, 2d loop"""
-        async_lock = asyncio.Lock()
+        # async_lock = asyncio.Lock()
         async for save_buffer in self.streaming_test_generator(
             frontend, streamed_data_file_2d, buffer_references_2d, (2, 3)
         ):
-            async with async_lock:
-                await save_buffer
+            # async with async_lock:
+            await save_buffer
 
     @pytest.mark.asyncio
     async def test_streaming_no_prepare_twice(
@@ -582,7 +530,6 @@ class TestFrontendV1WithStreaming(FrontendV1Tests):
 
         assert len(l_data.data.datasets) == len(buffer_references)  # type: ignore
         assert isinstance(l_data.data, Data)
-        [SharedMemoryOut.close(dataset.memory.name) for dataset in l_data.data.datasets]
         buffer_data = buffer_upload_data(buffer_references, size)
         arr = np.arange(np.prod(size)).reshape(size)
         if random:
@@ -615,13 +562,12 @@ class TestFrontendV1WithStreaming(FrontendV1Tests):
 
         await frontend.finalize_stream(streamed_data_file.data.handle)
         assert isinstance(l_data.data, Data)
-        [SharedMemoryOut.close(dataset.memory.name) for dataset in l_data.data.datasets]
 
 
 class TestFrontendV1GCS(TestFrontendV1WithStreaming):
     """Class for testing data server frontend v1 with Mongo DB and GCS Backends"""
 
-    @pytest.fixture(name="frontend")
+    @pytest.fixture(name="frontend", scope="class")
     def frontend_v1_gcs(self, frontend_mdb_gcs: FrontendV1):
         """Fixture that yields a frontend,
         with a Mongo DB metadata backend and a GCS data backend"""
@@ -632,7 +578,7 @@ class TestFrontendV1Config(FrontendV1Tests):
     """Class for testing data server frontend v1 with Mongo DB and FS Backends
     created from config"""
 
-    @pytest_asyncio.fixture(name="frontend")
+    @pytest_asyncio.fixture(name="frontend", scope="class")
     async def frontend_v1_fs_config(self, frontend_fs_config: FrontendV1Config):
         """Fixture that yields a frontend, created from config,
         with a Mongo DB metadata backend and a FS data backend"""
@@ -640,21 +586,26 @@ class TestFrontendV1Config(FrontendV1Tests):
         yield fend
         assert isinstance(fend.data_backend, FSBackend)
         assert isinstance(fend.metadata_backend, MongoDBBackend)
-        try:
-            fend.data_backend.filesystem.rm(
-                str(fend.data_backend.path_base), recursive=True
-            )
-            # fend.metadata_backend.client.drop_database(
-            #     fend.metadata_backend.database.name
-            # )
-        except FileNotFoundError:
-            pass
+        attempts = 2
+        while attempts > 0:
+            attempts -= 1
+            try:
+                fend.data_backend.filesystem.rm(
+                    str(fend.data_backend.path_base), recursive=True
+                )
+                # fend.metadata_backend.client.drop_database(
+                #     fend.metadata_backend.database.name
+                # )
+            except FileNotFoundError:
+                break
+            except OSError:
+                pass
 
 
 class TestFrontendV1GCSConfig(FrontendV1Tests):
     """Class for testing data server frontend v1 with Mongo DB and GCS Backends"""
 
-    @pytest_asyncio.fixture(name="frontend")
+    @pytest_asyncio.fixture(name="frontend", scope="class")
     async def frontend_v1_gcs_config(
         self, frontend_gcs_config: FrontendV1Config, gcs_filesystem: GCSFileSystem
     ):

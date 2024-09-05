@@ -1,6 +1,7 @@
 """
 Pydantic models to be used fro inter-process communication
 """
+
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ class StartStreamModel(BaseModel):
     start streaming data to the data server"""
 
     handle: MeasurementHandle
-    file: DataFile
+    data_file: DataFile
 
 
 class EndStreamModel(BaseModel):
@@ -32,7 +33,7 @@ class EndStreamModel(BaseModel):
     end streaming data to the data server"""
 
     handle: MeasurementHandle
-    file: DataFile | None = None
+    data_file: DataFile | None = None
 
 
 class SaveBufferModel(BaseModel):
@@ -58,8 +59,7 @@ class SliceModel(BaseModel):
         """Converts SliceModel to slice"""
         if self.step is None:
             return slice(self.start, self.stop)
-        else:
-            return slice(self.start, self.stop, self.step)
+        return slice(self.start, self.stop, self.step)
 
     @classmethod
     def from_slice(cls, slice_: slice) -> "SliceModel":

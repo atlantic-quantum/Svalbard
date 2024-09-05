@@ -1,4 +1,5 @@
 """MongoDB Metadata Backend"""
+
 import json
 import logging
 import os
@@ -8,6 +9,7 @@ from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from motor.core import AgnosticCollection, AgnosticDatabase
 from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import field_validator
 from pymongo.results import InsertOneResult
 from pymongo.server_api import ServerApi
 
@@ -96,13 +98,13 @@ class MongoDBBackend(AbstractMetadataBackend):
 
     async def save(self, metadata: BaseMetaData) -> Path:
         # todo AQC-289 - remove hack
-        dictionary = json.loads(metadata.json())
+        dictionary = json.loads(metadata.model_dump_json())
         if os.name == "nt" and dictionary["data_path"]:  # pragma: no cover
             dictionary["data_path"] = str(dictionary["data_path"]).replace("\\", "/")
         return await self._save(dictionary)
 
     async def update(self, path: Path, metadata: BaseMetaData):
-        dictionary = json.loads(metadata.json())
+        dictionary = json.loads(metadata.model_dump_json())
         if os.name == "nt" and dictionary["data_path"]:  # pragma: no cover
             dictionary["data_path"] = str(dictionary["data_path"]).replace("\\", "/")
         result: dict = await self.collection.find_one_and_replace(
@@ -125,7 +127,7 @@ class MongoDBBackend(AbstractMetadataBackend):
                 # alternativly we could change the docs in the database
                 if isinstance(metadata["data_path"], str):
                     metadata["data_path"] = metadata["data_path"].replace("\\", "/")
-                elif isinstance(metadata["data_path"], Path):
+                elif isinstance(metadata["data_path"], Path):  # pragma: no cover
                     metadata["data_path"] = str(metadata["data_path"]).replace(
                         "\\", "/"
                     )
@@ -182,7 +184,13 @@ class MongoDBConfig(AbstractMetadataBackendConfig):
     url: str
     database: str
     collection: str
-    certificate: str = ""
+    certificate: str | None = None
+
+    @field_validator("certificate")
+    def expand_user_certificate(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return os.path.expanduser(v)
 
     def init(self) -> MongoDBBackend:
-        return MongoDBBackend(**self.dict())
+        return MongoDBBackend(**self.model_dump())

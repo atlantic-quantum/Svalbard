@@ -7,8 +7,9 @@ should alternate
 """
 
 from enum import Enum
+from typing import Self
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class StepUnits(Enum):
@@ -88,24 +89,30 @@ class StepConfig(BaseModel):
     sweep_rate: float | None = 0.0
     alternate_direction: bool = False
 
-    @validator("wait_after")
+    @field_validator("wait_after")
+    @classmethod
     def wait_after_positive(cls, v: float):
         """wait after must be positive"""
-        assert v >= 0.0
+        if v < 0.0:
+            raise ValueError("wait_after must be positive")
         return v
 
-    @validator("sweep_rate")
-    def sweep_rate_validator(cls, v: float | None, values: dict):
-        """if sweep mode is direct then the sweep rate must not be None"""
-        assert "sweep_mode" in values
-        if values["sweep_mode"] != SweepMode.DIRECT:
-            assert v is not None
-        return v
+    @model_validator(mode="after")
+    def sweep_rate_validator(self) -> Self:
+        """if sweep mode is not direct then the sweep rate must not be None"""
+        if self.sweep_mode != SweepMode.DIRECT:
+            if self.sweep_rate is None:
+                raise ValueError(
+                    "sweep_rate must not be None if sweep_mode is not direct"
+                )
+        return self
 
-    @validator("final_value")
-    def final_value_validator(cls, v: float | None, values: dict):
+    @model_validator(mode="after")
+    def final_value_validator(self) -> Self:
         """if after_last_step is goto_value then final_value must not be None"""
-        assert "after_last_step" in values
-        if values["after_last_step"] == AfterLastStep.GOTO_VALUE:
-            assert v is not None
-        return v
+        if self.after_last_step == AfterLastStep.GOTO_VALUE:
+            if self.final_value is None:
+                raise ValueError(
+                    "final_value must not be None if after_last_step is goto_value"
+                )
+        return self

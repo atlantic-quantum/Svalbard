@@ -1,6 +1,8 @@
 """ Data Factory function along with tests for it"""
+
 import numpy as np
 import pytest
+
 from svalbard.data_model.data_file import Data, DataFile, MeasurementHandle, MetaData
 from svalbard.data_model.memory_models import SharedMemoryIn, SharedMemoryOut
 
@@ -87,7 +89,6 @@ def test_size_equal_parameters():
     assert datafile.data.datasets[1].memory.shape == shapes[1]
     assert datafile.data.datasets[2].memory.shape == shapes[2]
     assert datafile.data.datasets[3].memory.shape == shapes[3]
-    [SharedMemoryOut.close(mem_out.memory.name) for mem_out in datafile.data.datasets]
 
 
 def test_size_greater_parameters():
@@ -131,7 +132,6 @@ def test_size_greater_parameters():
     assert datafile.data.datasets[2].memory.shape == shapes[2]
     assert datafile.data.datasets[3].memory.shape == shapes[3]
     assert datafile.data.datasets[4].memory.shape == shapes[4]
-    [SharedMemoryOut.close(mem_out.memory.name) for mem_out in datafile.data.datasets]
 
 
 def test_only_size():
@@ -142,7 +142,6 @@ def test_only_size():
     assert datafile.data.datasets[0].memory.size() == 1000 * np.dtype("float").itemsize
     assert datafile.data.datasets[0].memory.dtype == np.dtype("float")
     assert datafile.data.datasets[0].memory.shape == (1000,)
-    [SharedMemoryOut.close(mem_out.memory.name) for mem_out in datafile.data.datasets]
 
 
 def test_only_size_and_type():
@@ -186,7 +185,6 @@ def test_only_size_and_shapes():
     )
     assert datafile.data.datasets[4].memory.size() != 0
     assert datafile.data.datasets[0].memory.dtype == np.dtype("float")
-    [SharedMemoryOut.close(mem_out.memory.name) for mem_out in datafile.data.datasets]
 
 
 def test_fewer_types_than_shapes():
@@ -223,7 +221,6 @@ def test_fewer_types_than_shapes():
     assert datafile.data.datasets[2].memory.dtype == dtypes[2]
     assert datafile.data.datasets[3].memory.dtype == np.dtype("float")
     assert datafile.data.datasets[4].memory.dtype == np.dtype("float")
-    [SharedMemoryOut.close(mem_out.memory.name) for mem_out in datafile.data.datasets]
 
 
 def test_fewer_shapes_than_types():

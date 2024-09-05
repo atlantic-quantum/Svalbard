@@ -1,16 +1,21 @@
 """ Module for Pydantic models for Memory Management """
+
 from abc import ABC, abstractmethod
-from multiprocessing.shared_memory import SharedMemory
+from multiprocessing.resource_tracker import unregister
+from multiprocessing.shared_memory import ShareableList
+from typing import Self
 
 import numpy as np
-from pydantic import BaseConfig, BaseModel, validator
-from typing_extensions import Self
+from pydantic import BaseModel, ConfigDict, field_validator
 
-from ..utility.shared_array import SharedArray
+from ..utility.shared_array import SharedArray, SharedCounter, SharedMemory
 
 # todo look inty pydantic and numpy dtypelike
 
-__memory_reference__: dict[str, SharedMemory] = {}
+__memory_list_reference__: dict[str, ShareableList] = {}
+
+# Limit of SharedMemory name length
+SHAREDLISTNAMELENGTH = 14
 
 
 class AbstractMemoryIn(ABC, BaseModel):
@@ -62,37 +67,32 @@ class SharedMemoryIn(AbstractMemoryIn):
     numpy array of a given datatype and size
     """
 
-    @validator("dtype", pre=True)
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("dtype", mode="before")
+    @classmethod
     def dtype_must_be_numpy_dtype(cls, dtype: str | np.dtype | type):
         """validates that dtype is a valid datatype"""
-        if isinstance(dtype, np.dtype):
-            return dtype.name
-        if isinstance(dtype, str | type):  # pylint: disable=W1116
-            # e.g. np.int64 is of type type not np.dtype
+        if isinstance(dtype, np.dtype | str):
             try:
-                np_v = np.dtype(dtype)
-                return np_v.name
+                return str(np.dtype(dtype))
             except TypeError as exc:
                 raise ValueError(
                     f"MemoryIn.dtype: value {dtype} is not a valid "
-                    + "string representation of a numpy datatype or numpy datatype"
+                    + "representation of a numpy datatype or numpy datatype"
                 ) from exc
-        else:
-            raise ValueError(f"Memory.dtype: value {dtype} neither np.dtype nor str")
-
-    class Config(BaseConfig):
-        """BaseModel confic class customization"""
-
-        allow_mutation = False
+        if isinstance(dtype, type):  # pylint: disable=W1116
+            # e.g. np.int64 is of type type not np.dtype
+            return str(np.dtype(dtype))
+        # reaches here if dtype is 'non-sensical' such as a dict
+        raise ValueError(f"Memory.dtype: value {dtype} neither np.dtype nor str")
 
     def size(self) -> int:
         """returns the size of the array created using dtype and shape in bytes"""
         return int(np.dtype(self.dtype).itemsize * np.prod(self.shape))
 
     def allocate(self) -> str:
-        shm = SharedMemory(None, create=True, size=self.size())
-        __memory_reference__[shm.name] = shm
-        # ! this may get garbaage collected on function return
+        shm = SharedMemory(None, create=True, size=self.size(), track=False)
         sha = SharedArray(
             self.shape, dtype=np.dtype(self.dtype), buffer=shm.buf, shm=shm
         )
@@ -107,9 +107,20 @@ class SharedMemoryOut(SharedMemoryIn, AbstractMemoryOut):
 
     name: str
 
+    @field_validator("name", mode="after")
+    @classmethod
+    def increment_counter(cls, name: str) -> str:
+        """increment the counter"""
+        try:
+            counter = SharedCounter(name=name)
+        except FileNotFoundError:
+            counter = SharedCounter(name=name, create=True)
+        counter.increase()
+        return name
+
     def to_array(self) -> SharedArray:
         "returns an array of the type and size specified using the named shared memory"
-        shm = SharedMemory(self.name)
+        shm = SharedMemory(self.name, track=False)
         return SharedArray(
             self.shape, dtype=np.dtype(self.dtype), buffer=shm.buf, shm=shm
         )
@@ -128,9 +139,68 @@ class SharedMemoryOut(SharedMemoryIn, AbstractMemoryOut):
             name (str): name of the shared memory to close
         """
         try:
-            shm = __memory_reference__[name]
+            shm = SharedMemory(name, track=False)
             shm.close()
             shm.unlink()
-            del __memory_reference__[name]
+        except FileNotFoundError:
+            pass
+
+    def __del__(self):
+        counter = SharedCounter(name=self.name)
+        counter.decrease()
+        if counter.value == 0:
+            self.close(self.name)
+            counter.close()
+
+
+class ShareableListOut(BaseModel):
+    """
+    ShareableListOut stores the current measurement
+    progress in the following shape:
+        [0] -> the total number of steps
+        [1] -> the current step
+        [2] -> the elapsed time as reported by tqdm
+        [3] -> the rate as reported by tqdm as a way to calculate
+        time remaining
+
+    The Measurement Executor will update this list during execution time.
+    """
+
+    name: str
+
+    @classmethod
+    def create_shareable_list(cls, name: str) -> ShareableList:
+        """
+        Create ShareableList for Measurement Executor Progress tracking.
+        """
+        short_name = name[:SHAREDLISTNAMELENGTH]
+        sl = ShareableList(name=short_name, sequence=[100, 1, 0.0, 0.0])
+        __memory_list_reference__[short_name] = sl
+        return sl
+
+    @classmethod
+    def get_shareable_list(cls, name: str) -> ShareableList:
+        """Return ShareableList based on name"""
+        short_name = name[:SHAREDLISTNAMELENGTH]
+        try:
+            sl = __memory_list_reference__[short_name]
+        except KeyError:  # pragma: no cover
+            sl = ShareableList(name=short_name)
+            unregister("/" + short_name, "shared_memory")
+            shm = SharedMemory(short_name, track=False)
+            sl.shm = shm
+            __memory_list_reference__[short_name] = sl
+        finally:
+            return sl
+
+    @classmethod
+    def close(cls, name: str):
+        """Clean up ShareableList"""
+        try:
+            short_name = name[:SHAREDLISTNAMELENGTH]
+            sl = __memory_list_reference__[short_name]
+            sl.shm.close()
+            sl.shm.unlink()
+            del __memory_list_reference__[short_name]
         except KeyError:
             pass
